@@ -1,0 +1,10 @@
+diffusers
+torch
+torchvision
+numpy
+Pillow
+transformers
+accelerate
+jupyter
+tqdm
+lpips

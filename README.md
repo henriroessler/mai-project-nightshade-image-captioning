@@ -1,1 +1,1 @@
-# mai-project-robust-diffusion
+# mai-project-nightshade-image-captioning
