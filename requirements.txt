@@ -8,3 +8,6 @@ accelerate
 jupyter
 tqdm
 lpips
+git+https://github.com/openai/CLIP.git
+pycocotools
+gdown
