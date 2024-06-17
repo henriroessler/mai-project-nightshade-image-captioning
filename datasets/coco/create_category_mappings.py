@@ -18,21 +18,33 @@ mode = "any" # map to any other category
 dataset = CocoDetection(IMAGES_PATH, ANNOTATIONS_PATH)
 
 categories = dataset.coco.loadCats(dataset.coco.getCatIds())
+supercategories = list(set([x['supercategory'] for x in categories]))
 
 mapping = []
+def not_in_map(category):
+    for item in mapping:
+        if item[1]['id'] == category['id']: return False
+    return True
+
+if mode == "intra":
+    for supercategory in supercategories:
+        subcategories = [x for x in categories if x['supercategory'] == supercategory]
+        random.shuffle(subcategories)
+        for i, category_a in enumerate(subcategories):
+            category_b = subcategories[(i + 1) % len(subcategories)]
+            mapping += [(category_a, category_b)]
+
 for i, category_a in enumerate(categories):
     if mode == "any":
-        category_b = random.choice([x for j, x in enumerate(categories) if i != j])
+        choices = [x for j, x in enumerate(categories) if i != j]
+        choices = list(filter(not_in_map, choices))
+        category_b = random.choice(choices)
     elif mode == "inter":
         choices = [x for j, x in enumerate(categories) if i != j and x["supercategory"] != category_a["supercategory"]]
+        choices = list(filter(not_in_map, choices))
         category_b = random.choice(choices)
     elif mode == "intra":
-        choices = [x for j, x in enumerate(categories) if i != j and x["supercategory"] == category_a["supercategory"]]
-        if len(choices) == 0:
-            category_b = category_a
-            logging.warning(f"Category {category_a} is alone in supercategory {category_a['supercategory']}.")
-        else:
-            category_b = random.choice(choices)
+        break
     else:
         raise RuntimeError("Invalid mode")
 
