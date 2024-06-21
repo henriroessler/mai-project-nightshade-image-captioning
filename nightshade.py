@@ -95,6 +95,7 @@ def preprocess_image(img: torch.Tensor, size: int, device) -> torch.Tensor:
 def nightshade(
         img_original: torch.Tensor,
         img_anchor: torch.Tensor,
+        bbox,
         encoder,
         lpips_criterion: lpips.LPIPS,
         downsample_size: int,
@@ -109,6 +110,12 @@ def nightshade(
     assert (num_epochs > 0)
     assert (lr > 0.0)
     assert (p >= 0.0)
+
+    # Extract image
+    if bbox is not None:
+        x, y, w, h = map(int, bbox)
+        img_original_full_size = img_original
+        img_original = img_original[:, y:y+h, x:x+w]
 
     # Start with exact copy of original image
     img_poisoned = torch.clone(img_original)
@@ -164,6 +171,12 @@ def nightshade(
     # Clamp poisoned image
     img_poisoned = torch.clamp(img_poisoned, min=0.0, max=1.0)
 
+    # Reinsert image
+    if bbox is not None:
+        img_poisoned_backup = img_poisoned
+        img_poisoned = img_original_full_size
+        img_poisoned[:, y:y+h, x:x+w] = img_poisoned_backup
+
     return NightshadeResult(img_poisoned, proc_poisoned, enc_poisoned, enc_loss, lpips_loss, loss)
 
 
@@ -176,7 +189,7 @@ def load_image(path: str) -> torch.Tensor:
 
 
 def individual_loader(args):
-    yield args.original_img, args.target_img, 'nightshade'
+    yield args.original_img, args.target_img, 'nightshade', None
 
 
 def coco_loader(args):
@@ -202,8 +215,13 @@ def coco_loader(args):
         target_file = dataset.coco.imgs[target_id]['file_name']
         target_path = os.path.join(args.image_dir, target_file)
 
-        yield original_path, target_path, f'{original_category}_{target_category}'
+        ann_ids = dataset.coco.getAnnIds(imgIds=[original_id])
+        anns = dataset.coco.loadAnns(ann_ids)
 
+        for i, ann in enumerate(anns):
+            category_id = ann['category_id']
+            if category_id == args.original_id and 'bbox' in ann:
+                yield original_path, target_path, f'{original_category}_{target_category}_{i}', ann['bbox']
 
 def main():
     args = parse_args()
@@ -224,13 +242,14 @@ def main():
     elif args.dataset == 'coco':
         loader = coco_loader(args)
 
-    for original_path, target_path, output_filename in loader:
+    for original_path, target_path, output_filename, bbox in loader:
         original_img = load_image(original_path).to(device)
         anchor_img = load_image(target_path).to(device)
 
         result = nightshade(
             original_img,
             anchor_img,
+            bbox,
             model,
             lpips_criterion,
             downsample_size,
