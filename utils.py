@@ -6,9 +6,6 @@ from dataclasses import dataclass
 import numpy as np
 
 
-SHARED_DIR = pathlib.Path(os.environ["WORK"]) / ".." / "shared"
-
-
 @dataclass
 class BBox:
     x: float

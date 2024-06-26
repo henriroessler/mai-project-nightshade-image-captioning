@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as nnf
 from torch import nn
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
+import glob
 
 N = type(None)
 V = np.array
@@ -220,35 +221,55 @@ def generate2(
     return generated_list[0]
 
 
+class ClipCap:
+
+    def __init__(self, clip_dir: str, clipcap_model: str, clip_model_name: str = 'ViT-B/32', gpt_model_name: str = 'gpt2', prefix_length: int = 10, device: Optional[torch.device] = None):
+        self.clip_dir = clip_dir
+        self.clipcap_model = clipcap_model
+        self.clip_model_name = clip_model_name
+        self.gpt_model_name = gpt_model_name
+        self.prefix_length = prefix_length
+
+        self.device = device
+        if device is None:
+            self.device = get_device(0)
+
+        self.clip_model, self.preprocess = clip.load(self.clip_model_name, device=device, jit=False, download_root=self.clip_dir)
+        self.tokenizer = GPT2Tokenizer.from_pretrained(self.gpt_model_name)
+
+        self.model = ClipCaptionModel(self.prefix_length)
+        self.model.load_state_dict(torch.load(self.clipcap_model, map_location=CPU), strict=False)
+        self.model = self.model.to(device).eval()
+
+    def get_caption(self, image_path: str, use_beam_search: bool = False) -> Optional[str]:
+        try:
+            pil_image = PIL.Image.open(image_path).convert("RGB")
+        except Exception as e:
+            print(f"Unable to open image {image_path}")
+            return None
+
+        image = self.preprocess(pil_image).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            prefix = self.clip_model.encode_image(image).to(self.device, dtype=torch.float32)
+            prefix_embed = self.model.clip_project(prefix).reshape(1, self.prefix_length, -1)
+        if use_beam_search:
+            generated_text_prefix = generate_beam(self.model, self.tokenizer, embed=prefix_embed)[0]
+        else:
+            generated_text_prefix = generate2(self.model, self.tokenizer, embed=prefix_embed)
+
+        return generated_text_prefix
+
+
 def main():
     args = parse_args()
 
-    device = get_device(0)
-    clip_model, preprocess = clip.load("ViT-B/32", device=device, jit=False, download_root=args.clip_model_dir)
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-
-    prefix_length = 10
-
-    model = ClipCaptionModel(prefix_length)
-    model.load_state_dict(torch.load(args.clipcap_model, map_location=CPU), strict=False)
-
-    model = model.eval()
-    model = model.to(device)
+    clipcap = ClipCap(args.clip_model_dir, args.clipcap_model)
 
     for image_filename in os.listdir(args.images_dir):
         image_path = os.path.join(args.images_dir, image_filename)
-        pil_image = PIL.Image.open(image_path).convert("RGB")
+        generated_text = clipcap.get_caption(image_path, args.use_beam_search)
 
-        image = preprocess(pil_image).unsqueeze(0).to(device)
-        with torch.no_grad():
-            prefix = clip_model.encode_image(image).to(device, dtype=torch.float32)
-            prefix_embed = model.clip_project(prefix).reshape(1, prefix_length, -1)
-        if args.use_beam_search:
-            generated_text_prefix = generate_beam(model, tokenizer, embed=prefix_embed)[0]
-        else:
-            generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
-
-        print(image_filename.rjust(32), '--', generated_text_prefix)
+        print(image_filename.rjust(32), '--', generated_text)
 
 
 if __name__ == '__main__':

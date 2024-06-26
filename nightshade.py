@@ -2,6 +2,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from typing import Optional
+import csv
 
 import PIL
 import lpips
@@ -12,6 +13,7 @@ from torchvision.datasets import CocoDetection
 from tqdm.auto import tqdm
 import clip
 from datetime import datetime
+from clipcap_inference import ClipCap
 
 import utils
 
@@ -29,6 +31,10 @@ def parse_args():
     parser.add_argument('--p', type=float, default=0.07)
     parser.add_argument('--alpha', type=float, default=100.0)
 
+    # Captioning
+    parser.add_argument('--clipcap-model', nargs='?', default=None)
+    parser.add_argument('--use-beam-search', action='store_true')
+
     # Dataset
     subparsers = parser.add_subparsers(title='dataset', dest='dataset')
 
@@ -45,6 +51,7 @@ def parse_args():
     coco_parser.add_argument('--target-id', type=int)
     coco_parser.add_argument('--start-index', type=int, default=0)
     coco_parser.add_argument('--num', '-n', type=int, default=None)
+    coco_parser.add_argument('--use-bboxes', action='store_true')
 
     return parser.parse_args()
 
@@ -54,9 +61,11 @@ class NightshadeResult:
     img: torch.Tensor
     proc_img: torch.Tensor
     enc_img: torch.Tensor
-    enc_loss: torch.Tensor
-    lpips_loss: torch.Tensor
-    loss: torch.Tensor
+    initial_enc_loss: float
+    original_enc_loss: float
+    target_enc_loss: float
+    lpips_loss: float
+    total_loss: float
 
 
 def preprocess_image(img: torch.Tensor, size: int, device) -> torch.Tensor:
@@ -68,7 +77,6 @@ def preprocess_image(img: torch.Tensor, size: int, device) -> torch.Tensor:
     :return: 3d tensor of preprocessed image and shape (C, S, S)
     """
     h, w = img.shape[-2:]
-    min_dim = min(h, w)
 
     # Downsample to size
     proc_img = torch.nn.functional.interpolate(
@@ -137,6 +145,9 @@ def nightshade(
     # Create optimizer
     optimizer = torch.optim.Adam([img_poisoned], lr=lr)
 
+    # Hold value for initial encoding loss
+    initial_enc_loss = 0.0
+
     # Epochs
     pbar = tqdm(range(num_epochs))
     for epoch in pbar:
@@ -150,6 +161,8 @@ def nightshade(
 
         # Calculate distance to anchor and original encoding
         enc_loss = torch.linalg.norm(enc_poisoned - enc_anchor)
+        if epoch == 0:
+            initial_enc_loss = enc_loss.item()
         enc_loss_original = torch.linalg.norm(enc_poisoned - enc_original)
 
         # Calculate perceptual similarity (LPIPS loss)
@@ -177,7 +190,7 @@ def nightshade(
         img_poisoned = img_original_full_size
         img_poisoned[:, y:y+h, x:x+w] = img_poisoned_backup
 
-    return NightshadeResult(img_poisoned, proc_poisoned, enc_poisoned, enc_loss, lpips_loss, loss)
+    return NightshadeResult(img_poisoned, proc_poisoned, enc_poisoned, initial_enc_loss, enc_loss_original.item(), enc_loss.item(), lpips_loss.item(), loss.item())
 
 
 def load_image(path: str) -> torch.Tensor:
@@ -188,8 +201,17 @@ def load_image(path: str) -> torch.Tensor:
     return transform(image)
 
 
+@dataclass
+class NightshadeItem:
+    original_path: str
+    target_path: str
+    file_name: str
+    original_bbox: Optional[utils.BBox]
+    target_bbox: Optional[utils.BBox]
+
+
 def individual_loader(args):
-    yield args.original_img, args.target_img, 'nightshade', None
+    yield args.original_img, args.target_img, os.path.splitext(os.path.basename(args.original_img))[0], None
 
 
 def coco_loader(args):
@@ -242,29 +264,65 @@ def main():
     elif args.dataset == 'coco':
         loader = coco_loader(args)
 
-    for original_path, target_path, output_filename, bbox in loader:
-        original_img = load_image(original_path).to(device)
-        anchor_img = load_image(target_path).to(device)
+    # Load captioning model if specified
+    clipcap = None
+    if args.clipcap_model is not None:
+        clipcap = ClipCap(args.clip_cache_dir, args.clipcap_model, device=device)
 
-        result = nightshade(
-            original_img,
-            anchor_img,
-            bbox,
-            model,
-            lpips_criterion,
-            downsample_size,
-            device,
-            lr=args.lr,
-            num_epochs=args.epochs,
-            alpha=args.alpha,
-            p=args.p
-        )
-        img = result.img
-        img = torchvision.transforms.ToPILImage()(img)
+    to_pil = torchvision.transforms.ToPILImage()
+    nowstr = lambda: datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        output_name = f"{output_filename}_{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
-        output_path = os.path.join(args.output_dir, output_name)
-        img.save(output_path)
+    results_path = os.path.join(args.output_dir, f'results_{nowstr()}.csv')
+    with open(results_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'lpips_loss', 'total_loss', 'original_caption', 'target_caption', 'poisoned_caption'])
+
+        for original_path, target_path, output_filename, bbox in loader:
+            # Load image pair
+            original_img = load_image(original_path).to(device)
+            anchor_img = load_image(target_path).to(device)
+
+            # Poison data
+            result = nightshade(
+                original_img,
+                anchor_img,
+                bbox,
+                model,
+                lpips_criterion,
+                downsample_size,
+                device,
+                lr=args.lr,
+                num_epochs=args.epochs,
+                alpha=args.alpha,
+                p=args.p
+            )
+            img = result.img
+            img = to_pil(img)
+
+            # Save poisoned image
+            file_name = f"{output_filename}_{nowstr()}"
+            output_name = f"{file_name}.png"
+            output_path = os.path.join(args.output_dir, output_name)
+            img.save(output_path)
+
+            # Determine poisoning noise (diff to original)
+            # Map between [0, 1]
+            img_diff = (result.img - original_img) / 2.0 + 0.5
+            img_diff = to_pil(img_diff)
+            diff_output_path = os.path.join(args.output_dir, f"{file_name}.diff.png")
+            img_diff.save(diff_output_path)
+
+            # Get captions
+            original_caption = None
+            target_caption = None
+            poisoned_caption = None
+            if clipcap is not None:
+                original_caption = clipcap.get_caption(original_path)
+                target_caption = clipcap.get_caption(target_path)
+                poisoned_caption = clipcap.get_caption(output_path)
+
+            # Save metrics to csv file
+            writer.writerow([original_path, target_path, output_path, diff_output_path, result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss, result.lpips_loss, result.total_loss, original_caption, target_caption, poisoned_caption])
 
 
 if __name__ == '__main__':
