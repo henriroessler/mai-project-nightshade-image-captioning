@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
-import pathlib
 from dataclasses import dataclass
+
 import numpy as np
 
 

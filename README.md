@@ -19,3 +19,14 @@ python3 clipcap_inference \
 ```
 
 This will print out captions generated for all images in `$IMAGES`.
+
+## Remote
+### Running on ALEX
+```bash
+sbatch $BATCH_JOB
+```
+
+### Interactive Mode
+```bash
+salloc --gres=gpu:a40:1 --time=00:30:00 --job-name=nightshade
+```

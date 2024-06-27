@@ -1,21 +1,21 @@
 import argparse
+import csv
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
-import csv
 
 import PIL
+import clip
 import lpips
 import torch
 import torch.optim
 import torchvision
 from torchvision.datasets import CocoDetection
 from tqdm.auto import tqdm
-import clip
-from datetime import datetime
-from clipcap_inference import ClipCap
 
 import utils
+from clipcap_inference import ClipCap
 
 
 def parse_args():
@@ -240,10 +240,13 @@ def coco_loader(args):
         ann_ids = dataset.coco.getAnnIds(imgIds=[original_id])
         anns = dataset.coco.loadAnns(ann_ids)
 
-        for i, ann in enumerate(anns):
-            category_id = ann['category_id']
-            if category_id == args.original_id and 'bbox' in ann:
-                yield original_path, target_path, f'{original_category}_{target_category}_{i}', ann['bbox']
+        if args.use_bboxes:
+            for i, ann in enumerate(anns):
+                category_id = ann['category_id']
+                if category_id == args.original_id and 'bbox' in ann:
+                    yield original_path, target_path, f'{original_category}_{target_category}_{i}', ann['bbox']
+        else:
+            yield original_path, target_path, f'{original_category}_{target_category}', None
 
 def main():
     args = parse_args()
@@ -275,7 +278,7 @@ def main():
     results_path = os.path.join(args.output_dir, f'results_{nowstr()}.csv')
     with open(results_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'lpips_loss', 'total_loss', 'original_caption', 'target_caption', 'poisoned_caption'])
+        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'uses_bboxes', 'lr', 'num_epochs', 'alpha', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'lpips_loss', 'total_loss', 'original_caption', 'target_caption', 'poisoned_caption'])
 
         for original_path, target_path, output_filename, bbox in loader:
             # Load image pair
@@ -322,7 +325,7 @@ def main():
                 poisoned_caption = clipcap.get_caption(output_path)
 
             # Save metrics to csv file
-            writer.writerow([original_path, target_path, output_path, diff_output_path, result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss, result.lpips_loss, result.total_loss, original_caption, target_caption, poisoned_caption])
+            writer.writerow([original_path, target_path, output_path, diff_output_path, bbox is not None, args.lr, args.epochs, args.alpha, args.p, result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss, result.lpips_loss, result.total_loss, original_caption, target_caption, poisoned_caption])
 
 
 if __name__ == '__main__':
