@@ -1,5 +1,6 @@
 import argparse
 import csv
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +14,7 @@ import torch.optim
 import torchvision
 from torchvision.datasets import CocoDetection
 from tqdm.auto import tqdm
+from pycocotools.coco import COCO
 
 import utils
 from clipcap_inference import ClipCap
@@ -47,6 +49,7 @@ def parse_args():
     coco_parser = subparsers.add_parser('coco')
     coco_parser.add_argument('--image-dir')
     coco_parser.add_argument('--annotation-file')
+    coco_parser.add_argument('--captions-file')
     coco_parser.add_argument('--original-id', type=int)
     coco_parser.add_argument('--target-id', type=int)
     coco_parser.add_argument('--start-index', type=int, default=0)
@@ -66,6 +69,8 @@ class NightshadeResult:
     target_enc_loss: float
     lpips_loss: float
     total_loss: float
+    best_epoch: int
+    last_lr: float
 
 
 def preprocess_image(img: torch.Tensor, size: int, device) -> torch.Tensor:
@@ -144,12 +149,17 @@ def nightshade(
 
     # Create optimizer
     optimizer = torch.optim.Adam([img_poisoned], lr=lr)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5)
 
     # Hold value for initial encoding loss
     initial_enc_loss = 0.0
 
+    # Track best results
+    best_result = None
+    best_loss = math.inf
+
     # Epochs
-    pbar = tqdm(range(num_epochs))
+    pbar = tqdm(range(num_epochs+1), total=num_epochs)
     for epoch in pbar:
         optimizer.zero_grad()
 
@@ -171,33 +181,45 @@ def nightshade(
         # Calculate total loss
         loss = enc_loss + alpha * torch.maximum(lpips_loss - p, torch.tensor(0.0))
 
-        pbar.set_description(f'[{epoch+1}] enc {enc_loss.item():.3f} (to orig {enc_loss_original.item():.3f}) '
-                             f'| lpips {lpips_loss.item():.3f} '
-                             f'| total {loss.item():.3f}')
+        # Store best result
+        if loss.item() < best_loss:
+            best_result = NightshadeResult(torch.clamp(img_poisoned, min=0.0, max=1.0), proc_poisoned, enc_poisoned, initial_enc_loss, enc_loss_original.item(), enc_loss.item(), lpips_loss.item(), loss.item(), epoch, lr_scheduler.get_last_lr()[0])
+            best_loss = loss.item()
 
-        # Compute gradients
-        loss.backward()
+        lr_scheduler.step(loss)
 
-        # Update poisoned image
-        optimizer.step()
+        # Skip in last epoch
+        if epoch < num_epochs:
+            pbar.set_description(f'[{epoch+1}] enc {enc_loss.item():.3f} (to orig {enc_loss_original.item():.3f}) '
+                                 f'| lpips {lpips_loss.item():.3f} '
+                                 f'| total {loss.item():.3f}')
 
-    # Clamp poisoned image
-    img_poisoned = torch.clamp(img_poisoned, min=0.0, max=1.0)
+            # Compute gradients
+            loss.backward()
+
+            # Update poisoned image
+            optimizer.step()
 
     # Reinsert image
     if bbox is not None:
-        img_poisoned_backup = img_poisoned
+        img_poisoned_backup = best_result.img
         img_poisoned = img_original_full_size
         img_poisoned[:, y:y+h, x:x+w] = img_poisoned_backup
+        best_result.img = img_poisoned
 
-    return NightshadeResult(img_poisoned, proc_poisoned, enc_poisoned, initial_enc_loss, enc_loss_original.item(), enc_loss.item(), lpips_loss.item(), loss.item())
+    return best_result
 
 
-def load_image(path: str) -> torch.Tensor:
+def load_image(path: str, size: Optional[int] = None) -> torch.Tensor:
     image = PIL.Image.open(path).convert("RGB")
-    transform = torchvision.transforms.Compose([
+    transforms = [
         torchvision.transforms.ToTensor()
-    ])
+    ]
+    if size is not None:
+        transforms.append(torchvision.transforms.Resize(size))
+
+    transform = torchvision.transforms.Compose(transforms)
+
     return transform(image)
 
 
@@ -206,12 +228,20 @@ class NightshadeItem:
     original_path: str
     target_path: str
     file_name: str
-    original_bbox: Optional[utils.BBox]
-    target_bbox: Optional[utils.BBox]
+    original_bbox: Optional[utils.BBox] = None
+    target_bbox: Optional[utils.BBox] = None
+    original_concept: Optional[str] = None
+    target_concept: Optional[str] = None
+    original_caption: Optional[str] = None
+    target_caption: Optional[str] = None
 
 
 def individual_loader(args):
-    yield args.original_img, args.target_img, os.path.splitext(os.path.basename(args.original_img))[0], None
+    yield NightshadeItem(
+        args.original_img,
+        args.target_img,
+        os.path.splitext(os.path.basename(args.original_img))[0]
+    )
 
 
 def coco_loader(args):
@@ -227,6 +257,10 @@ def coco_loader(args):
     num_target_imgs = len(target_img_ids)
     print(f'found {num_original_imgs} original and {num_target_imgs} target images')
 
+    # Load captions file
+    coco_captions = COCO(args.captions_file)
+    get_captions = lambda image_id: [ann['caption'] for ann in coco_captions.imgToAnns[image_id]]
+
     for original_id, target_id in tqdm(list(zip(
             original_img_ids[args.start_index:args.start_index + args.num],
             target_img_ids[args.start_index:args.start_index + args.num]
@@ -240,13 +274,29 @@ def coco_loader(args):
         ann_ids = dataset.coco.getAnnIds(imgIds=[original_id])
         anns = dataset.coco.loadAnns(ann_ids)
 
+        # Retrieve captions
+        original_captions = get_captions(original_id)
+        target_captions = get_captions(target_id)
+
+        file_name = f'{original_category}_{target_category}'
+        bbox = None
+
         if args.use_bboxes:
             for i, ann in enumerate(anns):
                 category_id = ann['category_id']
                 if category_id == args.original_id and 'bbox' in ann:
-                    yield original_path, target_path, f'{original_category}_{target_category}_{i}', ann['bbox']
-        else:
-            yield original_path, target_path, f'{original_category}_{target_category}', None
+                    file_name = f'{original_category}_{target_category}_{i}'
+                    bbox = ann['bbox']
+
+        yield NightshadeItem(
+            original_path,
+            target_path,
+            file_name,
+            bbox,
+            original_concept=original_category,
+            target_concept=target_category
+        )
+
 
 def main():
     args = parse_args()
@@ -278,18 +328,21 @@ def main():
     results_path = os.path.join(args.output_dir, f'results_{nowstr()}.csv')
     with open(results_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'uses_bboxes', 'lr', 'num_epochs', 'alpha', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'lpips_loss', 'total_loss', 'original_caption', 'target_caption', 'poisoned_caption'])
+        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'uses_bboxes', 'initial_lr', 'last_lr',
+                         'num_epochs', 'best_epoch', 'alpha', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss',
+                         'lpips_loss', 'total_loss', 'original_concept', 'target_concept', 'original_caption',
+                         'poisoned_caption', 'target_caption'])
 
-        for original_path, target_path, output_filename, bbox in loader:
+        for item in loader:
             # Load image pair
-            original_img = load_image(original_path).to(device)
-            anchor_img = load_image(target_path).to(device)
+            original_img = load_image(item.original_path, None).to(device)
+            anchor_img = load_image(item.target_path, None).to(device)
 
             # Poison data
             result = nightshade(
                 original_img,
                 anchor_img,
-                bbox,
+                item.original_bbox,
                 model,
                 lpips_criterion,
                 downsample_size,
@@ -303,7 +356,7 @@ def main():
             img = to_pil(img)
 
             # Save poisoned image
-            file_name = f"{output_filename}_{nowstr()}"
+            file_name = f"{item.file_name}_{nowstr()}"
             output_name = f"{file_name}.png"
             output_path = os.path.join(args.output_dir, output_name)
             img.save(output_path)
@@ -320,12 +373,17 @@ def main():
             target_caption = None
             poisoned_caption = None
             if clipcap is not None:
-                original_caption = clipcap.get_caption(original_path)
-                target_caption = clipcap.get_caption(target_path)
+                original_caption = clipcap.get_caption(item.original_path)
+                target_caption = clipcap.get_caption(item.target_path)
                 poisoned_caption = clipcap.get_caption(output_path)
 
             # Save metrics to csv file
-            writer.writerow([original_path, target_path, output_path, diff_output_path, bbox is not None, args.lr, args.epochs, args.alpha, args.p, result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss, result.lpips_loss, result.total_loss, original_caption, target_caption, poisoned_caption])
+            writer.writerow([item.original_path, item.target_path, output_path, diff_output_path,
+                             item.original_bbox is not None, args.lr, result.last_lr, args.epochs, result.best_epoch, args.alpha, args.p,
+                             result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss,
+                             result.lpips_loss, result.total_loss, item.original_concept, item.target_concept,
+                             original_caption, poisoned_caption, target_caption])
+            csvfile.flush()
 
 
 if __name__ == '__main__':
