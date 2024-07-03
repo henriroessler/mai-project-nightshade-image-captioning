@@ -12,3 +12,4 @@ git+https://github.com/openai/CLIP.git
 pycocotools
 gdown
 evaluate
+nltk

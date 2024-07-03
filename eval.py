@@ -1,11 +1,14 @@
 import argparse
 import csv
+import json
 import os
 from collections import defaultdict
+from typing import List
 
 from pycocotools.coco import COCO
 import evaluate
 from glob import glob
+import re
 
 
 def parse_args():
@@ -14,6 +17,7 @@ def parse_args():
     parser.add_argument('--captions-file', default='shared/coco2014/annotations/captions_all2014.json')
     parser.add_argument('--synonyms-file', default='datasets/coco_synonyms.json')
     parser.add_argument('--outfile', default='shared/results_vanilla.csv')
+    parser.add_argument('--metrics', nargs='*', default=['bleu', 'meteor'])
     return parser.parse_args()
 
 
@@ -21,6 +25,29 @@ def get_captions(coco: COCO, id: int):
     anns = coco.imgToAnns[id]
     captions = [ann['caption'] for ann in anns]
     return captions
+
+
+# Source: https://stackoverflow.com/questions/5319922/check-if-a-word-is-in-a-string-in-python
+def check_for_synonyms(prediction: str, synonyms: List[str]) -> bool:
+    for synonym in synonyms:
+        result = re.compile(r'\b({0})\b'.format(synonym), flags=re.IGNORECASE).search(prediction)
+        if result is not None:
+            return True
+    return False
+
+
+def count_synonyms(predictions: List[str], synonyms_1: List[str], synonyms_2: List[str]) -> (int, int, int):
+    pos, neg, both = 0, 0, 0
+    for prediction in predictions:
+        is_pos = check_for_synonyms(prediction, synonyms_1)
+        is_neg = check_for_synonyms(prediction, synonyms_2)
+        is_both = is_pos and is_neg
+
+        pos += int(is_pos)
+        neg += int(is_neg)
+        is_both += int(is_both)
+
+    return pos, neg, both
 
 
 def main():
@@ -46,23 +73,56 @@ def main():
                 original_captions[concept_pair].append(result['original_caption'])
                 poisoned_captions[concept_pair].append(result['poisoned_caption'])
 
+    # Collect synonyms
+    with open(args.synonyms_file, 'r') as f:
+        synonyms = json.load(f)
+        for concept in synonyms.keys():
+            synonyms[concept].append(concept)
+
     # Evaluate captions
-    bleu_scorer = evaluate.load('bleu')
+    metrics = args.metrics
+    scorer = {metric: evaluate.load(metric) for metric in metrics}
     with open(args.outfile, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['original_concept', 'target_concept', 'original_bleu', 'poisoned_bleu'])
 
+        # Write header
+        header = ['original_concept', 'target_concept', 'num_images', 'original_positive', 'original_negative', 'original_both', 'poisoned_positive', 'poisoned_negative', 'poisoned_both']
+        for metric in metrics:
+            header.extend([f'original_{metric}', f'poisoned_{metric}'])
+        writer.writerow(header)
+
+        # Iterate over all concept pairs
         for concept_pair in original_captions.keys():
             print(f'>> Evaluating captions for concept pair {concept_pair}')
-            original_bleu = bleu_scorer.compute(
-                predictions=original_captions[concept_pair],
-                references=reference_captions[concept_pair]
-            )['bleu']
-            poisoned_bleu = bleu_scorer.compute(
-                predictions=poisoned_captions[concept_pair],
-                references=reference_captions[concept_pair]
-            )['bleu']
-            writer.writerow([*concept_pair, original_bleu, poisoned_bleu])
+            row = [*concept_pair]
+
+            references = reference_captions[concept_pair]
+            original_predictions = original_captions[concept_pair]
+            poisoned_predictions = poisoned_captions[concept_pair]
+            num_images = len(references)
+            row.append(num_images)
+
+            # Evaluate using synonyms list
+            original_synonyms = synonyms[concept_pair[0]]
+            poisoned_synonyms = synonyms[concept_pair[1]]
+            row.extend(count_synonyms(original_predictions, original_synonyms, poisoned_synonyms))
+            row.extend(count_synonyms(poisoned_predictions, poisoned_synonyms, original_synonyms))
+
+            # Evaluate using huggingface metrics
+            scores = []
+            for metric in metrics:
+                original_score = scorer[metric].compute(
+                    predictions=original_predictions,
+                    references=references
+                )[metric]
+                poisoned_score = scorer[metric].compute(
+                    predictions=poisoned_predictions,
+                    references=references
+                )[metric]
+                scores.extend([original_score, poisoned_score])
+            row.extend(scores)
+
+            writer.writerow(row)
 
     print('Done.')
 
