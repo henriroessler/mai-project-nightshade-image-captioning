@@ -1,10 +1,11 @@
 import argparse
 import csv
+import json
 import math
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 import PIL
 import clip
@@ -12,9 +13,9 @@ import lpips
 import torch
 import torch.optim
 import torchvision
+import torchvision.transforms.functional as F
 from torchvision.datasets import CocoDetection
 from tqdm.auto import tqdm
-from pycocotools.coco import COCO
 
 import utils
 from clipcap_inference import ClipCap
@@ -31,7 +32,8 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=3e-3)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--p', type=float, default=0.07)
-    parser.add_argument('--alpha', type=float, default=100.0)
+    parser.add_argument('--alpha', type=float, default=4.0)
+    parser.add_argument('--beta', type=float, default=10.0)
 
     # Captioning
     parser.add_argument('--clipcap-model', nargs='?', default=None)
@@ -50,11 +52,14 @@ def parse_args():
     coco_parser.add_argument('--image-dir')
     coco_parser.add_argument('--annotation-file')
     coco_parser.add_argument('--captions-file')
+    coco_parser.add_argument('--split-file')
+    coco_parser.add_argument('--splits', nargs='+')
     coco_parser.add_argument('--original-id', type=int)
     coco_parser.add_argument('--target-id', type=int)
     coco_parser.add_argument('--start-index', type=int, default=0)
     coco_parser.add_argument('--num', '-n', type=int, default=None)
     coco_parser.add_argument('--use-bboxes', action='store_true')
+    coco_parser.add_argument('--single-class', action='store_true')
 
     return parser.parse_args()
 
@@ -68,6 +73,7 @@ class NightshadeResult:
     original_enc_loss: float
     target_enc_loss: float
     lpips_loss: float
+    overshoot_loss: float
     total_loss: float
     best_epoch: int
     last_lr: float
@@ -81,26 +87,28 @@ def preprocess_image(img: torch.Tensor, size: int, device) -> torch.Tensor:
     :param size: size S of downsampled image
     :return: 3d tensor of preprocessed image and shape (C, S, S)
     """
-    h, w = img.shape[-2:]
 
     # Downsample to size
-    proc_img = torch.nn.functional.interpolate(
-        img.unsqueeze(dim=0),
-        size=size,
-        mode='bicubic',
-        antialias=True,
-        align_corners=False
-    ).squeeze()
+    proc_img = F.resize(img, size, F.InterpolationMode.BICUBIC, None, True)
+    # proc_img_2 = torch.nn.functional.interpolate(
+    #     img.unsqueeze(dim=0),
+    #     size=size,
+    #     mode='bicubic',
+    #     antialias=True,
+    #     align_corners=False
+    # ).squeeze()
 
     # Center Crop
-    h, w = proc_img.shape[-2:]
-    x, y = (h - size) // 2, (w - size) // 2
-    proc_img = proc_img[:, x:x + size, y:y + size]
+    proc_img = F.center_crop(proc_img, [size, size])
+    # h, w = proc_img.shape[-2:]
+    # x, y = (h - size) // 2, (w - size) // 2
+    # proc_img_2 = proc_img_2[:, x:x + size, y:y + size]
 
     # Normalize
-    proc_img = proc_img.permute(1, 2, 0)
-    proc_img = (proc_img - torch.tensor((0.48145466, 0.4578275, 0.40821073)).to(device)) / torch.tensor((0.26862954, 0.26130258, 0.27577711)).to(device)
-    proc_img = proc_img.permute(2, 0, 1)
+    proc_img = F.normalize(proc_img, [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711], False)
+    # proc_img_2 = proc_img_2.permute(1, 2, 0)
+    # proc_img_2 = (proc_img_2 - torch.tensor((0.48145466, 0.4578275, 0.40821073)).to(device)) / torch.tensor((0.26862954, 0.26130258, 0.27577711)).to(device)
+    # proc_img_2 = proc_img_2.permute(2, 0, 1)
 
     return proc_img
 
@@ -113,7 +121,8 @@ def nightshade(
         lpips_criterion: lpips.LPIPS,
         downsample_size: int,
         device,
-        alpha: float = 10.0,
+        alpha: float = 4.0,
+        beta: float = 10.0,
         p: float = 0.07,
         num_epochs: int = 50,
         lr: float = 0.003
@@ -149,7 +158,7 @@ def nightshade(
 
     # Create optimizer
     optimizer = torch.optim.Adam([img_poisoned], lr=lr)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.75, patience=5)
 
     # Hold value for initial encoding loss
     initial_enc_loss = 0.0
@@ -178,12 +187,16 @@ def nightshade(
         # Calculate perceptual similarity (LPIPS loss)
         lpips_loss = lpips_criterion(img_poisoned, img_original, normalize=True)[0][0][0][0]
 
+        # Overshooting loss
+        img_clipped = torch.clip(img_poisoned, 0.0, 1.0)
+        overshoot_loss = torch.sum((torch.abs(img_poisoned) - img_clipped) ** 2)
+
         # Calculate total loss
-        loss = enc_loss + alpha * torch.maximum(lpips_loss - p, torch.tensor(0.0))
+        loss = enc_loss + alpha * torch.maximum(lpips_loss - p, torch.tensor(0.0)) + beta * overshoot_loss
 
         # Store best result
         if loss.item() < best_loss:
-            best_result = NightshadeResult(torch.clamp(img_poisoned, min=0.0, max=1.0), proc_poisoned, enc_poisoned, initial_enc_loss, enc_loss_original.item(), enc_loss.item(), lpips_loss.item(), loss.item(), epoch, lr_scheduler.get_last_lr()[0])
+            best_result = NightshadeResult(img_poisoned, proc_poisoned, enc_poisoned, initial_enc_loss, enc_loss_original.item(), enc_loss.item(), lpips_loss.item(), overshoot_loss.item(), loss.item(), epoch, lr_scheduler.get_last_lr()[0])
             best_loss = loss.item()
 
         lr_scheduler.step(loss)
@@ -192,6 +205,7 @@ def nightshade(
         if epoch < num_epochs:
             pbar.set_description(f'[{epoch+1}] enc {enc_loss.item():.3f} (to orig {enc_loss_original.item():.3f}) '
                                  f'| lpips {lpips_loss.item():.3f} '
+                                 f'| overshoot {overshoot_loss.item():.3f} '
                                  f'| total {loss.item():.3f}')
 
             # Compute gradients
@@ -245,6 +259,16 @@ def individual_loader(args):
 
 
 def coco_loader(args):
+
+    # Load train/val/test/restval splits
+    with open(args.split_file, 'r') as f:
+        splits = json.load(f)
+
+    print(f'only considering images in splits {args.splits}')
+    valid_image_ids = []
+    for split in args.splits:
+        valid_image_ids.extend(splits[split])
+
     dataset = CocoDetection(args.image_dir, args.annotation_file)
 
     original_category = dataset.coco.cats[args.original_id]['name']
@@ -258,13 +282,30 @@ def coco_loader(args):
     print(f'found {num_original_imgs} original and {num_target_imgs} target images')
 
     # Load captions file
-    coco_captions = COCO(args.captions_file)
-    get_captions = lambda image_id: [ann['caption'] for ann in coco_captions.imgToAnns[image_id]]
+    # coco_captions = COCO(args.captions_file)
+    # get_captions = lambda image_id: [ann['caption'] for ann in coco_captions.imgToAnns[image_id]]
 
-    for original_id, target_id in tqdm(list(zip(
-            original_img_ids[args.start_index:args.start_index + args.num],
-            target_img_ids[args.start_index:args.start_index + args.num]
-    ))):
+    # Filter data
+    def filter_image_ids(image_ids: List[int], blacklist_cat_id: int) -> List[int]:
+        result = []
+        for id in image_ids:
+            cat_ids = set([ann['category_id'] for ann in dataset.coco.imgToAnns[id]])
+            if id in valid_image_ids and blacklist_cat_id not in cat_ids and (not args.single_class or len(cat_ids) == 1):
+                result.append(id)
+        return result
+
+    filtered_original_ids = filter_image_ids(original_img_ids, args.target_id)
+    filtered_target_ids = filter_image_ids(target_img_ids, args.original_id)
+    print(f'out of those, {len(filtered_original_ids)} original and {len(filtered_target_ids)} target images are suitable for poisoning')
+
+    pairs = list(zip(
+            filtered_original_ids[args.start_index:],
+            filtered_target_ids[args.start_index:]
+    ))
+    if args.num is not None:
+        pairs = pairs[:args.num]
+
+    for original_id, target_id in tqdm(pairs):
         original_file = dataset.coco.imgs[original_id]['file_name']
         original_path = os.path.join(args.image_dir, original_file)
 
@@ -275,8 +316,8 @@ def coco_loader(args):
         anns = dataset.coco.loadAnns(ann_ids)
 
         # Retrieve captions
-        original_captions = get_captions(original_id)
-        target_captions = get_captions(target_id)
+        # original_captions = get_captions(original_id)
+        # target_captions = get_captions(target_id)
 
         file_name = f'{original_category}_{target_category}'
         bbox = None
@@ -296,6 +337,28 @@ def coco_loader(args):
             original_concept=original_category,
             target_concept=target_category
         )
+
+
+def evaluate(model, image_preprocess_fn, image_path: str, caption: str, device) -> (float, float):
+    image = PIL.Image.open(image_path).convert("RGB")
+    image = image_preprocess_fn(image).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        enc_image = model.encode_image(image).to(device, dtype=torch.float32)
+        enc_text = model.encode_text(caption).to(device, dtype=torch.float32)
+
+    return None, None
+
+
+def evaluate_image_pairs(model, image_preprocess_fn, original_image_path: str, poisoned_image_path: str, target_image_path, device) -> (float, float):
+    model.eval()
+    with torch.no_grad():
+        encode = lambda path: model.encode_image(image_preprocess_fn(PIL.Image.open(path)).unsqueeze(0).to(device))
+        enc_original = encode(original_image_path)
+        enc_poisoned = encode(poisoned_image_path)
+        enc_target = encode(target_image_path)
+
+    return torch.linalg.norm(enc_poisoned - enc_original).item(), torch.linalg.norm(enc_poisoned - enc_target).item()
 
 
 def main():
@@ -328,9 +391,9 @@ def main():
     results_path = os.path.join(args.output_dir, f'results_{nowstr()}.csv')
     with open(results_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'diff_image', 'uses_bboxes', 'initial_lr', 'last_lr',
-                         'num_epochs', 'best_epoch', 'alpha', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss',
-                         'lpips_loss', 'total_loss', 'original_concept', 'target_concept', 'original_caption',
+        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'uses_bboxes', 'initial_lr', 'last_lr',
+                         'num_epochs', 'best_epoch', 'alpha', 'beta', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'clip_original_enc_loss', 'clip_target_enc_loss',
+                         'lpips_loss', 'overshoot_loss', 'total_loss', 'original_concept', 'target_concept', 'original_caption',
                          'poisoned_caption', 'target_caption'])
 
         for item in loader:
@@ -350,6 +413,7 @@ def main():
                 lr=args.lr,
                 num_epochs=args.epochs,
                 alpha=args.alpha,
+                beta=args.beta,
                 p=args.p
             )
             img = result.img
@@ -363,10 +427,10 @@ def main():
 
             # Determine poisoning noise (diff to original)
             # Map between [0, 1]
-            img_diff = (result.img - original_img) / 2.0 + 0.5
-            img_diff = to_pil(img_diff)
-            diff_output_path = os.path.join(args.output_dir, f"{file_name}.diff.png")
-            img_diff.save(diff_output_path)
+            # img_diff = (result.img - original_img) / 2.0 + 0.5
+            # img_diff = to_pil(img_diff)
+            # diff_output_path = os.path.join(args.output_dir, f"{file_name}.diff.png")
+            # img_diff.save(diff_output_path)
 
             # Get captions
             original_caption = None
@@ -377,11 +441,15 @@ def main():
                 target_caption = clipcap.get_caption(item.target_path)
                 poisoned_caption = clipcap.get_caption(output_path)
 
+            # Evaluate encodings
+            clip_original_enc_loss, clip_target_enc_loss = evaluate_image_pairs(model, preprocess, item.original_path, output_path, item.target_path, device)
+
             # Save metrics to csv file
-            writer.writerow([item.original_path, item.target_path, output_path, diff_output_path,
-                             item.original_bbox is not None, args.lr, result.last_lr, args.epochs, result.best_epoch, args.alpha, args.p,
+            writer.writerow([item.original_path, item.target_path, output_path,
+                             item.original_bbox is not None, args.lr, result.last_lr, args.epochs, result.best_epoch, args.alpha, args.beta, args.p,
                              result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss,
-                             result.lpips_loss, result.total_loss, item.original_concept, item.target_concept,
+                             clip_original_enc_loss, clip_target_enc_loss,
+                             result.lpips_loss, result.overshoot_loss, result.total_loss, item.original_concept, item.target_concept,
                              original_caption, poisoned_caption, target_caption])
             csvfile.flush()
 

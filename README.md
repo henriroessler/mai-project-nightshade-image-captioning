@@ -30,3 +30,8 @@ sbatch $BATCH_JOB
 ```bash
 salloc --gres=gpu:a40:1 --time=00:30:00 --job-name=nightshade
 ```
+
+### Job stoppen
+```bash
+scancel $JOB_ID
+```

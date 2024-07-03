@@ -1,0 +1,17 @@
+original_id,target_id,original_concept,target_concept,type
+55,52,orange,banana,intra
+19,21,horse,cow,intra
+47,44,cup,bottle,intra
+41,42,skateboard,surfboard,intra
+3,4,car,motorcycle,intra
+1,5,person,airplane,inter
+9,54,boat,sandwich,inter
+17,7,cat,train,inter
+46,10,wine glass,traffic light,inter
+81,27,sink,backpack,inter
+28,88,umbrella,teddy bear,bidirectional
+88,28,teddy bear,umbrella,bidirectional
+32,59,tie,pizza,bidirectional
+59,32,pizza,tie,bidirectional
+70,20,toilet,sheep,bidirectional
+20,70,sheep,toilet,bidirectional
