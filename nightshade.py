@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, List
+import uuid
 
 import PIL
 import clip
@@ -248,6 +249,8 @@ class NightshadeItem:
     target_concept: Optional[str] = None
     original_caption: Optional[str] = None
     target_caption: Optional[str] = None
+    original_id: Optional[int] = None
+    target_id: Optional[int] = None
 
 
 def individual_loader(args):
@@ -335,7 +338,9 @@ def coco_loader(args):
             file_name,
             bbox,
             original_concept=original_category,
-            target_concept=target_category
+            target_concept=target_category,
+            original_id=original_id,
+            target_id=target_id
         )
 
 
@@ -388,10 +393,10 @@ def main():
     to_pil = torchvision.transforms.ToPILImage()
     nowstr = lambda: datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    results_path = os.path.join(args.output_dir, f'results_{nowstr()}.csv')
+    results_path = os.path.join(args.output_dir, f'results_{nowstr()}_{uuid.uuid4().hex}.csv')
     with open(results_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'uses_bboxes', 'initial_lr', 'last_lr',
+        writer.writerow(['original_image', 'target_image', 'poisoned_image', 'original_id', 'target_id', 'uses_bboxes', 'initial_lr', 'last_lr',
                          'num_epochs', 'best_epoch', 'alpha', 'beta', 'p', 'initial_enc_loss', 'original_enc_loss', 'target_enc_loss', 'clip_original_enc_loss', 'clip_target_enc_loss',
                          'lpips_loss', 'overshoot_loss', 'total_loss', 'original_concept', 'target_concept', 'original_caption',
                          'poisoned_caption', 'target_caption'])
@@ -445,7 +450,7 @@ def main():
             clip_original_enc_loss, clip_target_enc_loss = evaluate_image_pairs(model, preprocess, item.original_path, output_path, item.target_path, device)
 
             # Save metrics to csv file
-            writer.writerow([item.original_path, item.target_path, output_path,
+            writer.writerow([item.original_path, item.target_path, output_path, item.original_id, item.target_id,
                              item.original_bbox is not None, args.lr, result.last_lr, args.epochs, result.best_epoch, args.alpha, args.beta, args.p,
                              result.initial_enc_loss, result.original_enc_loss, result.target_enc_loss,
                              clip_original_enc_loss, clip_target_enc_loss,

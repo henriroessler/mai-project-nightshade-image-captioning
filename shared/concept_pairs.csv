@@ -9,6 +9,8 @@ original_id,target_id,original_concept,target_concept,type
 17,7,cat,train,inter
 46,10,wine glass,traffic light,inter
 81,27,sink,backpack,inter
+42,41,surfboard,skateboard,bidirectional
+7,17,train,cat,bidirectional
 28,88,umbrella,teddy bear,bidirectional
 88,28,teddy bear,umbrella,bidirectional
 32,59,tie,pizza,bidirectional

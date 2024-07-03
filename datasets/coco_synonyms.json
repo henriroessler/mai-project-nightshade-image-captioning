@@ -1,0 +1,63 @@
+{
+  "horse": [
+    "horses"
+  ],
+  "cow": [
+    "cows"
+  ],
+  "orange": [
+    "oranges"
+  ],
+  "banana": [
+    "bananas"
+  ],
+  "cup": [
+    "cups"
+  ],
+  "bottle": [
+    "bottles"
+  ],
+  "skateboard": [
+    "skateboards"
+  ],
+  "surfboard": [
+    "surfboards"
+  ],
+  "car": [
+    "cars"
+  ],
+  "motorcycle": [
+    "motorcycles"
+  ],
+  "person": [
+    "people",
+    "individuals"
+  ],
+  "airplane": [
+    "airplanes"
+  ],
+  "boat": [
+    "boats"
+  ],
+  "sandwich": [
+    "sandwiches"
+  ],
+  "cat": [
+    "cats"
+  ],
+  "train": [
+    "trains"
+  ],
+  "wine glass": [
+    "wine glasses"
+  ],
+  "traffic light": [
+    "traffic lights"
+  ],
+  "sink": [
+    "sinks"
+  ],
+  "backpack": [
+    "backpacks"
+  ]
+}
