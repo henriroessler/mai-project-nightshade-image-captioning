@@ -20,8 +20,6 @@ from transformers import pipeline
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--results-dir', default='shared/nightshade/coco-2014-restval')
-    parser.add_argument('--captions-file', default='shared/coco2014/annotations/captions_all2014.json')
-    parser.add_argument('--synonyms-file', default='datasets/coco_synonyms.json')
     parser.add_argument('--outfile', default='shared/classification_results_vanilla.csv')
     return parser.parse_args()
 
