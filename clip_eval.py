@@ -75,12 +75,12 @@ def main():
         writer = csv.writer(f)
 
         # Write header
-        header = ['original_concept', 'target_concept']
-        for metric in metrics:
-            header.extend([f'original_{metric}', f'poisoned_{metric}'])
+        header = ['original_concept', 'target_concept', "original_correct_concept", "poisoned_correct_concept"]
+        # for metric in metrics:
+        #     header.extend([f'original_{metric}', f'poisoned_{metric}'])
         writer.writerow(header)
         
-
+        ms_coco_concept_lst = ["person",   "bicycle",   "car",   "motorcycle",   "airplane",   "bus",   "train",   "truck",   "boat",  "traffic light",  "fire hydrant",   "stop sign",   "parking meter",   "bench",   "bird",   "cat",   "dog",   "horse",   "sheep",   "cow",   "elephant",   "bear",   "zebra",   "giraffe",   "backpack",   "umbrella",   "handbag",   "tie",   "suitcase",   "frisbee",   "skis",   "snowboard",   "sports ball",   "kite",   "baseball bat",   "baseball glove",   "skateboard",   "surfboard",   "tennis racket",   "bottle",   "wine glass",   "cup",   "fork",   "knife",   "spoon",   "bowl",   "banana",   "apple",   "sandwich",   "orange",   "broccoli",   "carrot",   "hot dog",   "pizza",   "donut",   "cake",   "chair",   "couch",   "potted plant",   "bed",   "dining table",   "toilet",   "tv",   "laptop",   "mouse",   "remote",   "keyboard",   "cell phone",   "microwave",   "oven",   "toaster",   "sink",   "refrigerator",   "book",   "clock",   "vase",   "scissors",   "teddy bear",   "hair drier",   "toothbrush"]
         # Iterate over all concept pairs
         for concept_pair in original_images.keys():
             print(f'>> Classifying images for concept pair {concept_pair}')
@@ -89,8 +89,8 @@ def main():
             orig_images = [Image.open(path) for path in original_images[concept_pair]]
             pois_images = [Image.open(path) for path in poisoned_images[concept_pair]]
 
-            original_logits = detector(orig_images, candidate_labels=list(concept_pair))
-            poisoned_logits = detector(pois_images, candidate_labels=list(concept_pair))
+            original_logits = detector(orig_images, candidate_labels=ms_coco_concept_lst)
+            poisoned_logits = detector(pois_images, candidate_labels=ms_coco_concept_lst)
 
             original_labels[concept_pair] = extract_highest_scores(original_logits)
             poisoned_labels[concept_pair] = extract_highest_scores(poisoned_logits)
@@ -98,19 +98,22 @@ def main():
             original_predictions = map_to_binary(original_labels[concept_pair], concept_pair[0])
             poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[1])
 
-            references = [1] * len(original_predictions)
-            # Evaluate using huggingface metrics
-            scores = []
-            for metric in metrics:
-                original_score = scorer[metric].compute(
-                    predictions=original_predictions,
-                    references=references
-                )[metric]
-                poisoned_score = scorer[metric].compute(
-                    predictions=poisoned_predictions,
-                    references=references
-                )[metric]
-                scores.extend([original_score, poisoned_score])
+            
+            
+            scores = [
+                sum(original_predictions)/len(original_predictions),
+                sum(poisoned_predictions)/len(poisoned_predictions),
+            ]
+            # for metric in metrics:
+            #     original_score = scorer[metric].compute(
+            #         predictions=original_predictions,
+            #         references=references
+            #     )[metric]
+            #     poisoned_score = scorer[metric].compute(
+            #         predictions=poisoned_predictions,
+            #         references=references
+            #     )[metric]
+            #     scores.extend([original_score, poisoned_score])
             row.extend(scores)
 
             writer.writerow(row)
