@@ -2,8 +2,8 @@
 #
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=06:00:00
-#SBATCH --job-name=clip-eval
-#SBATCH --output=/home/atuin/g103ea/shared/logs/clip-eval.log
+#SBATCH --job-name=eval
+#SBATCH --output=/home/atuin/g103ea/shared/logs/eval-j%.log
 #SBATCH --export=None
 
 unset SLURM_EXPORT_ENV
