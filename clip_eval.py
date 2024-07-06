@@ -47,7 +47,7 @@ def main():
         device = torch.device("cuda")
     print('device:', device)
 
-    checkpoint = "openai/clip-vit-large-patch14"
+    checkpoint = "openai/clip-vit-base-patch32"
     detector = pipeline(model=checkpoint, task="zero-shot-image-classification", device=device)
 
     original_images = defaultdict(list)
