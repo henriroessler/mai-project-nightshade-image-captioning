@@ -95,8 +95,8 @@ def main():
             original_labels[concept_pair] = extract_highest_scores(original_logits)
             poisoned_labels[concept_pair] = extract_highest_scores(poisoned_logits)
             
-            original_predictions = map_to_binary(original_labels, concept_pair[0])
-            poisoned_predictions = map_to_binary(poisoned_labels, concept_pair[1])
+            original_predictions = map_to_binary(original_labels[concept_pair], concept_pair[0])
+            poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[1])
 
             references = [1] * len(original_predictions)
             # Evaluate using huggingface metrics
