@@ -13,4 +13,4 @@ pycocotools
 gdown
 evaluate
 nltk
-sklearn
+scikit-learn
