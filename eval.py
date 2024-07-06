@@ -3,7 +3,7 @@ import csv
 import json
 import os
 from collections import defaultdict
-from typing import List, Union
+from typing import List, Union, Dict
 
 from pycocotools.coco import COCO
 import evaluate
@@ -64,6 +64,14 @@ def count_synonyms(predictions: Union[List[str], List[List[str]]], synonyms_1: L
     return pos, neg, both
 
 
+def get_synonyms(synonyms_file: str) -> Dict[str, List[str]]:
+    with open(synonyms_file, 'r') as f:
+        synonyms = json.load(f)
+        for concept in synonyms.keys():
+            synonyms[concept].append(concept)
+    return synonyms
+
+
 def main():
     args = parse_args()
     coco = COCO(args.captions_file)
@@ -100,10 +108,7 @@ def main():
                     poisoned_captions[concept_pair].append(result['poisoned_caption'])
 
     # Collect synonyms
-    with open(args.synonyms_file, 'r') as f:
-        synonyms = json.load(f)
-        for concept in synonyms.keys():
-            synonyms[concept].append(concept)
+    synonyms = get_synonyms(args.synonyms_file)
 
     # Evaluate captions
     metrics = args.metrics
