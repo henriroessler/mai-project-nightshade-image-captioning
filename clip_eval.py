@@ -11,6 +11,7 @@ from glob import glob
 import re
 
 from PIL import Image
+import torch
 from transformers import CLIPProcessor, CLIPModel
 from transformers import pipeline
 
@@ -47,7 +48,7 @@ def main():
         device = torch.device("cuda")
     print('device:', device)
 
-    checkpoint = "openai/clip-vit-large-patch14"
+    checkpoint = "openai/clip-vit-base-patch32"
     detector = pipeline(model=checkpoint, task="zero-shot-image-classification", device=device)
 
     original_images = defaultdict(list)
@@ -68,18 +69,20 @@ def main():
     # Evaluate images on clip
     metrics = ["accuracy", "precision", "recall"]
     scorer = {metric: evaluate.load(metric) for metric in metrics}
+    original_labels=defaultdict(list)
+    poisoned_labels=defaultdict(list)
     with open(args.outfile, 'w', newline='') as f:
         writer = csv.writer(f)
 
         # Write header
-        header = ['original_concept', 'target_concept',  'original_prediction', 'original_prediction_score', 'posioned_prediction', 'posioned_prediction_score']
+        header = ['original_concept', 'target_concept']
         for metric in metrics:
             header.extend([f'original_{metric}', f'poisoned_{metric}'])
         writer.writerow(header)
         
 
         # Iterate over all concept pairs
-        for concept_pair in original_captions.keys():
+        for concept_pair in original_images.keys():
             print(f'>> Classifying images for concept pair {concept_pair}')
             row = [*concept_pair]
 
@@ -89,10 +92,13 @@ def main():
             original_logits = detector(orig_images, candidate_labels=list(concept_pair))
             poisoned_logits = detector(pois_images, candidate_labels=list(concept_pair))
 
-            original_predictions = map_to_binary(extract_highest_scores(original_logits), concept_pair[0])
-            poisoned_predictions = map_to_binary(extract_highest_scores(poisoned_logits), concept_pair[0])
+            original_labels[concept_pair] = extract_highest_scores(original_logits)
+            poisoned_labels[concept_pair] = extract_highest_scores(poisoned_logits)
+            
+            original_predictions = map_to_binary(original_labels, concept_pair[0])
+            poisoned_predictions = map_to_binary(poisoned_labels, concept_pair[1])
 
-            references = [1] len(original_predictions)
+            references = [1] * len(original_predictions)
             # Evaluate using huggingface metrics
             scores = []
             for metric in metrics:

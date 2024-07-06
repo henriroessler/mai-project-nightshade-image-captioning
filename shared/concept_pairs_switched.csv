@@ -1,0 +1,11 @@
+original_id,target_id,original_concept,target_concept,type
+52,55,banana,orange,intra
+21,19,cow,horse,intra
+44,47,bottle,cup,intra
+42,41,surfboard,skateboard,intra
+4,3,motorcycle,car,intra
+5,1,airplane,person,inter
+54,9,sandwich,boat,inter
+7,17,train,cat,inter
+10,46,traffic light,wine glass,inter
+27,81,backpack,sink,inter
