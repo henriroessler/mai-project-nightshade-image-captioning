@@ -11,6 +11,7 @@ from glob import glob
 import re
 
 from PIL import Image
+import torch
 from transformers import CLIPProcessor, CLIPModel
 from transformers import pipeline
 
