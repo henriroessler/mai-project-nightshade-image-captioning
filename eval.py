@@ -47,6 +47,9 @@ def count_synonyms(predictions: List[str], synonyms_1: List[str], synonyms_2: Li
         neg += int(is_neg)
         is_both += int(is_both)
 
+        if not is_pos and not is_neg and not is_both:
+            print(f'{synonyms_1[-1]} :: {prediction}')
+
     return pos, neg, both
 
 

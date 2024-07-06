@@ -1,9 +1,13 @@
 {
   "horse": [
-    "horses"
+    "horses",
+    "horseback",
+    "pony",
+    "ponies"
   ],
   "cow": [
-    "cows"
+    "cows",
+    "cattle"
   ],
   "orange": [
     "oranges"
@@ -12,47 +16,156 @@
     "bananas"
   ],
   "cup": [
-    "cups"
+    "cups",
+    "pot",
+    "pots",
+    "glass",
+    "glasses"
   ],
   "bottle": [
     "bottles"
   ],
   "skateboard": [
-    "skateboards"
+    "skateboards",
+    "skateboarder",
+    "skateboarders",
+    "skateboarding",
+    "skate"
   ],
   "surfboard": [
-    "surfboards"
+    "surfboards",
+    "surfer",
+    "surfers",
+    "surfing",
+    "surf",
+    "windsurfer",
+    "windsurfers",
+    "windsurfing",
+    "water ski",
+    "water skis",
+    "water skiing",
+    "paddle",
+    "paddles",
+    "kite",
+    "kiteboard",
+    "kiteboards",
+    "kiteboarder",
+    "kiteboarders",
+    "kiteboarding",
+    "boogie boards",
+    "boogie boards"
   ],
   "car": [
-    "cars"
+    "cars",
+    "bus",
+    "buses",
+    "cab",
+    "cabs",
+    "truck",
+    "trucks",
+    "carriage",
+    "carriages",
+    "van",
+    "vans"
   ],
   "motorcycle": [
-    "motorcycles"
+    "motorcycles",
+    "motorcyclist",
+    "motorcyclists",
+    "motorbike",
+    "motorbikes",
+    "bike",
+    "bikes",
+    "biker",
+    "bikers",
+    "moped",
+    "mopeds",
+    "scooter",
+    "scooters"
   ],
   "person": [
     "people",
-    "individuals"
+    "individuals",
+    "woman",
+    "women",
+    "man",
+    "men",
+    "girl",
+    "girls",
+    "boy",
+    "boys",
+    "baby",
+    "babies",
+    "child",
+    "children"
   ],
   "airplane": [
-    "airplanes"
+    "airplanes",
+    "jet",
+    "jets",
+    "jetliner",
+    "jetliners",
+    "plane",
+    "planes",
+    "biplane",
+    "biplanes"
   ],
   "boat": [
-    "boats"
+    "boats",
+    "ferry",
+    "ferries",
+    "sailboat",
+    "sailboats",
+    "kayak",
+    "ship",
+    "ships",
+    "vessel",
+    "vessels"
   ],
   "sandwich": [
-    "sandwiches"
+    "sandwiches",
+    "toast",
+    "toasts",
+    "hamburger",
+    "hamburgers",
+    "burger",
+    "burgers"
   ],
   "cat": [
-    "cats"
+    "cats",
+    "kitten",
+    "kittens",
+    "kitty",
+    "kitties"
   ],
   "train": [
-    "trains"
+    "trains",
+    "tank engine",
+    "tank engines",
+    "trolley car",
+    "trolley cars",
+    "railroad",
+    "railroads",
+    "railway",
+    "railways"
   ],
   "wine glass": [
-    "wine glasses"
+    "wine glasses",
+    "glass of wine",
+    "glasses of wine"
   ],
   "traffic light": [
-    "traffic lights"
+    "traffic lights",
+    "red light",
+    "red lights",
+    "green light",
+    "green lights",
+    "yellow light",
+    "yellow lights",
+    "stop light",
+    "stop lights",
+    "stoplight",
+    "stoplights"
   ],
   "sink": [
     "sinks"
