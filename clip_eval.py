@@ -75,7 +75,7 @@ def main():
         writer = csv.writer(f)
 
         # Write header
-        header = ['original_concept', 'target_concept', "original_correct_concept", "poisoned_correct_concept"]
+        header = ['original_concept', 'target_concept', "original_correct_concept", "poisoned_correct_concept", "poisoned_orig_concept"]
         # for metric in metrics:
         #     header.extend([f'original_{metric}', f'poisoned_{metric}'])
         writer.writerow(header)
