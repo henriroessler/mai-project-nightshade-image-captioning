@@ -3,7 +3,7 @@ import csv
 import json
 import os
 from collections import defaultdict
-from typing import List
+from typing import List, Union
 
 from pycocotools.coco import COCO
 import evaluate
@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument('--synonyms-file', default='datasets/coco_synonyms.json')
     parser.add_argument('--outfile', default='shared/results_vanilla.csv')
     parser.add_argument('--metrics', nargs='*', default=['bleu', 'meteor'])
+    parser.add_argument('--type', choices=['vanilla', 'finetuned'], default='vanilla')
     return parser.parse_args()
 
 
@@ -36,19 +37,29 @@ def check_for_synonyms(prediction: str, synonyms: List[str]) -> bool:
     return False
 
 
-def count_synonyms(predictions: List[str], synonyms_1: List[str], synonyms_2: List[str]) -> (int, int, int):
+def count_synonyms(predictions: Union[List[str], List[List[str]]], synonyms_1: List[str], synonyms_2: List[str]) -> (int, int, int):
     pos, neg, both = 0, 0, 0
-    for prediction in predictions:
-        is_pos = check_for_synonyms(prediction, synonyms_1)
-        is_neg = check_for_synonyms(prediction, synonyms_2)
+    for prediction_list in predictions:
+
+        if isinstance(prediction_list, str):
+            prediction_list = [prediction_list]
+
+        # check if at least one caption includes the synonyms
+        is_pos = is_neg = False
+        for prediction in prediction_list:
+            if not is_pos:
+                is_pos |= check_for_synonyms(prediction, synonyms_1)
+            if not is_neg:
+                is_neg |= check_for_synonyms(prediction, synonyms_2)
+
         is_both = is_pos and is_neg
 
         pos += int(is_pos)
         neg += int(is_neg)
         is_both += int(is_both)
 
-        if not is_pos and not is_neg and not is_both:
-            print(f'{synonyms_1[-1]} :: {prediction}')
+        # if not is_pos and not is_neg and not is_both:
+        #     print(f'{synonyms_1[-1]} :: {prediction}')
 
     return pos, neg, both
 
@@ -59,8 +70,10 @@ def main():
 
     # Collect captions
     original_captions = defaultdict(list)
+    target_captions = defaultdict(list)
     poisoned_captions = defaultdict(list)
     reference_captions = defaultdict(list)
+    reference_target_captions = defaultdict(list)
 
     result_paths = glob(os.path.join(args.results_dir, '*.csv'))
     for result_path in result_paths:
@@ -70,11 +83,21 @@ def main():
 
             for result in results:
                 concept_pair = (result['original_concept'], result['target_concept'])
-                original_id = int(result['original_id'])
+
+                id_col = 'original_id' if args.type == 'vanilla' else 'image_id'
+                original_id = int(result[id_col])
                 captions = get_captions(coco, original_id)
                 reference_captions[concept_pair].append(captions)
-                original_captions[concept_pair].append(result['original_caption'])
-                poisoned_captions[concept_pair].append(result['poisoned_caption'])
+                if args.type == 'vanilla':
+                    reference_target_captions[concept_pair].append(get_captions(coco, int(result['target_id'])))
+
+                original_col = 'original_caption' if args.type == 'vanilla' else 'pretrained_caption'
+                target_col = 'target_caption' if args.type == 'vanilla' else 'finetuned_caption'
+                original_captions[concept_pair].append(result[original_col])
+                target_captions[concept_pair].append(result[target_col])
+
+                if args.type == 'vanilla':
+                    poisoned_captions[concept_pair].append(result['poisoned_caption'])
 
     # Collect synonyms
     with open(args.synonyms_file, 'r') as f:
@@ -89,9 +112,20 @@ def main():
         writer = csv.writer(f)
 
         # Write header
-        header = ['original_concept', 'target_concept', 'num_images', 'original_positive', 'original_negative', 'original_both', 'poisoned_positive', 'poisoned_negative', 'poisoned_both']
+        header = ['original_concept', 'target_concept', 'num_images']
+        if args.type == 'vanilla':
+            header.extend(['original_positive', 'original_negative', 'original_both', 'poisoned_positive', 'poisoned_negative', 'poisoned_both', 'target_positive', 'target_negative', 'target_both'])
+            header.extend(['original_references_positive', 'original_references_negative', 'original_references_both'])
+            header.extend(['target_references_positive', 'target_references_negative', 'target_references_both'])
+        else:
+            header.extend(['pretrained_positive', 'pretrained_negative', 'pretrained_both', 'finetuned_positive', 'finetuned_negative', 'finetuned_both'])
+            header.extend(['references_positive', 'references_negative', 'references_both'])
+
+        original_prefix = 'original' if args.type == 'vanilla' else 'pretrained'
+        poisoned_prefix = 'poisoned' if args.type == 'vanilla' else 'finetuned'
         for metric in metrics:
-            header.extend([f'original_{metric}', f'poisoned_{metric}'])
+            header.extend([f'{original_prefix}_{metric}', f'{poisoned_prefix}_{metric}'])
+
         writer.writerow(header)
 
         # Iterate over all concept pairs
@@ -100,16 +134,25 @@ def main():
             row = [*concept_pair]
 
             references = reference_captions[concept_pair]
+            target_references = reference_target_captions[concept_pair]
             original_predictions = original_captions[concept_pair]
             poisoned_predictions = poisoned_captions[concept_pair]
+            target_predictions = target_captions[concept_pair]
             num_images = len(references)
             row.append(num_images)
 
             # Evaluate using synonyms list
             original_synonyms = synonyms[concept_pair[0]]
             poisoned_synonyms = synonyms[concept_pair[1]]
-            row.extend(count_synonyms(original_predictions, original_synonyms, poisoned_synonyms))
-            row.extend(count_synonyms(poisoned_predictions, poisoned_synonyms, original_synonyms))
+            syn1, syn2 = (original_synonyms, poisoned_synonyms) if args.type == 'vanilla' else (poisoned_synonyms, original_synonyms)
+            row.extend(count_synonyms(original_predictions, syn1, syn2))
+            if args.type == 'vanilla':
+                row.extend(count_synonyms(poisoned_predictions, syn2, syn1))
+            row.extend(count_synonyms(target_predictions, syn2, syn1))
+
+            row.extend(count_synonyms(references, syn1, syn2))
+            if args.type == 'vanilla':
+                row.extend(count_synonyms(target_references, syn2, syn1))
 
             # Evaluate using huggingface metrics
             scores = []
@@ -119,7 +162,7 @@ def main():
                     references=references
                 )[metric]
                 poisoned_score = scorer[metric].compute(
-                    predictions=poisoned_predictions,
+                    predictions=poisoned_predictions if args.type == 'vanilla' else target_predictions,
                     references=references
                 )[metric]
                 scores.extend([original_score, poisoned_score])
