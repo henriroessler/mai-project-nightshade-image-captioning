@@ -89,7 +89,9 @@ def main():
             orig_images = [Image.open(path) for path in original_images[concept_pair]]
             pois_images = [Image.open(path) for path in poisoned_images[concept_pair]]
 
+            # Predicitions for the original non poisoned images
             original_logits = detector(orig_images, candidate_labels=ms_coco_concept_lst)
+            # Predicitions for the poisoned images
             poisoned_logits = detector(pois_images, candidate_labels=ms_coco_concept_lst)
 
             original_labels[concept_pair] = extract_highest_scores(original_logits)
@@ -97,23 +99,13 @@ def main():
             
             original_predictions = map_to_binary(original_labels[concept_pair], concept_pair[0])
             poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[1])
+            orig_poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[0])
 
-            
-            
             scores = [
                 sum(original_predictions)/len(original_predictions),
                 sum(poisoned_predictions)/len(poisoned_predictions),
+                sum(orig_poisoned_predictions)/len(orig_poisoned_predictions),
             ]
-            # for metric in metrics:
-            #     original_score = scorer[metric].compute(
-            #         predictions=original_predictions,
-            #         references=references
-            #     )[metric]
-            #     poisoned_score = scorer[metric].compute(
-            #         predictions=poisoned_predictions,
-            #         references=references
-            #     )[metric]
-            #     scores.extend([original_score, poisoned_score])
             row.extend(scores)
 
             writer.writerow(row)
