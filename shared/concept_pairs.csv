@@ -1,11 +1,11 @@
-original_id,target_id,original_concept,target_concept,type
-55,52,orange,banana,intra
-19,21,horse,cow,intra
-47,44,cup,bottle,intra
-41,42,skateboard,surfboard,intra
-3,4,car,motorcycle,intra
-1,5,person,airplane,inter
-9,54,boat,sandwich,inter
-17,7,cat,train,inter
-46,10,wine glass,traffic light,inter
-81,27,sink,backpack,inter
+original_id,target_id,original_concept,target_concept,type,concat_name
+55,52,orange,banana,intra,orange_banana
+19,21,horse,cow,intra,horse_cow
+47,44,cup,bottle,intra,cup_bottle
+41,42,skateboard,surfboard,intra,skateboard_surfboard
+3,4,car,motorcycle,intra,car_motorcycle
+1,5,person,airplane,inter,person_airplane
+9,54,boat,sandwich,inter,boat_sandwich
+17,7,cat,train,inter,cat_train
+46,10,wine glass,traffic light,inter,wine_glass_traffic_light
+81,27,sink,backpack,inter,sink_backpack
