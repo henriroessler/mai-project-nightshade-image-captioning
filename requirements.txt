@@ -13,4 +13,6 @@ pycocotools
 gdown
 evaluate
 nltk
+pandas
 scikit-learn
+scikit-image
