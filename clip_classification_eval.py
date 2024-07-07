@@ -75,7 +75,7 @@ def main():
         writer = csv.writer(f)
 
         # Write header
-        header = ['original_concept', 'target_concept', "original_correct_concept", "poisoned_correct_concept", "poisoned_orig_concept"]
+        header = ['original_concept', 'target_concept', "original_img_orig_concept", "original_img_target_concept" , "poisoned_img_target_concept", "poisoned_img_orig_concept"]
         # for metric in metrics:
         #     header.extend([f'original_{metric}', f'poisoned_{metric}'])
         writer.writerow(header)
@@ -97,14 +97,16 @@ def main():
             original_labels[concept_pair] = extract_highest_scores(original_logits)
             poisoned_labels[concept_pair] = extract_highest_scores(poisoned_logits)
             
-            original_predictions = map_to_binary(original_labels[concept_pair], concept_pair[0])
-            poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[1])
-            orig_poisoned_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[0])
+            original_images_orig_concept_predictions = map_to_binary(original_labels[concept_pair], concept_pair[0])
+            original_images_trgt_concept_predictions = map_to_binary(original_labels[concept_pair], concept_pair[1])
+            poisoned_images_trgt_concept_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[1])
+            poisoned_images_orig_concept_predictions = map_to_binary(poisoned_labels[concept_pair], concept_pair[0])
 
             scores = [
-                sum(original_predictions)/len(original_predictions),
-                sum(poisoned_predictions)/len(poisoned_predictions),
-                sum(orig_poisoned_predictions)/len(orig_poisoned_predictions),
+                sum(original_images_orig_concept_predictions)/len(original_images_orig_concept_predictions),
+                sum(original_images_trgt_concept_predictions)/len(original_images_trgt_concept_predictions),
+                sum(poisoned_images_trgt_concept_predictions)/len(poisoned_images_trgt_concept_predictions),
+                sum(poisoned_images_orig_concept_predictions)/len(poisoned_images_orig_concept_predictions),
             ]
             row.extend(scores)
 
