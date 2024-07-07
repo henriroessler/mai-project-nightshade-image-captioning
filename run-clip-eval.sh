@@ -16,4 +16,4 @@ source $WORK/venv/bin/activate
 
 export SHARED=/home/atuin/g103ea/shared
 
-python3 clip_classification_eval.py --results-dir $SHARED/nightshade/coco-2014-restval --outfile $SHARED/classification_results_vanilla.csv
+python3 clip_classification_eval.py --results-dir shared/nightshade/coco-2014-poisoning-switched-filtered --outfile $SHARED/classification_results_poisoned_switched_filtered.csv
