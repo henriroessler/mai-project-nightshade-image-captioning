@@ -15,7 +15,7 @@ CMAP = mpl.colormaps['tab10']
 COLORS = {
     'original': CMAP(0.0),
     'poisoned': CMAP(0.3),
-    'target': CMAP(0.4)
+    'target': CMAP(0.2)
 }
 
 
