@@ -1,11 +1,21 @@
-original_id,target_id,original_concept,target_concept,type,concat_name
-55,52,orange,banana,intra,orange_banana
-19,21,horse,cow,intra,horse_cow
-47,44,cup,bottle,intra,cup_bottle
-41,42,skateboard,surfboard,intra,skateboard_surfboard
-3,4,car,motorcycle,intra,car_motorcycle
-1,5,person,airplane,inter,person_airplane
-9,54,boat,sandwich,inter,boat_sandwich
-17,7,cat,train,inter,cat_train
-46,10,wine glass,traffic light,inter,wine_glass_traffic_light
-81,27,sink,backpack,inter,sink_backpack
+original_id,target_id,original_concept,target_concept,type,concat_name,model
+55,52,orange,banana,intra,orange_banana,origpairs
+19,21,horse,cow,intra,horse_cow,origpairs
+47,44,cup,bottle,intra,cup_bottle,origpairs
+41,42,skateboard,surfboard,intra,skateboard_surfboard,origpairs
+3,4,car,motorcycle,intra,car_motorcycle,origpairs
+1,5,person,airplane,inter,person_airplane,origpairs
+9,54,boat,sandwich,inter,boat_sandwich,origpairs
+17,7,cat,train,inter,cat_train,origpairs
+46,10,wine glass,traffic light,inter,wine_glass_traffic_light,origpairs
+81,27,sink,backpack,inter,sink_backpack,origpairs
+52,55,banana,orange,intra,banana_orange,switchpairs
+21,19,cow,horse,intra,cow_horse,switchpairs
+44,47,bottle,cup,intra,bottle_cup,switchpairs
+42,41,surfboard,skateboard,intra,surfboard_skateboard,switchpairs
+4,3,motorcycle,car,intra,motorcycle_car,switchpairs
+5,1,airplane,person,inter,airplane_person,switchpairs
+54,9,sandwich,boat,inter,sandwich_boat,switchpairs
+7,17,train,cat,inter,train_cat,switchpairs
+10,46,traffic light,wine glass,inter,traffic_light_wine_glass,switchpairs
+27,81,backpack,sink,inter,backpack_sink,switchpairs

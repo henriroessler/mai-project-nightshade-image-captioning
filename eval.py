@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import List, Union, Dict
 
 from pycocotools.coco import COCO
+import pandas as pd
 import evaluate
 from glob import glob
 import re
@@ -16,6 +17,7 @@ def parse_args():
     parser.add_argument('--results-dir', default='shared/nightshade/coco-2014-restval')
     parser.add_argument('--captions-file', default='shared/coco2014/annotations/captions_all2014.json')
     parser.add_argument('--synonyms-file', default='datasets/coco_synonyms.json')
+    parser.add_argument('--concept-pairs-file', default='shared/concept_pairs.csv')
     parser.add_argument('--outfile', default='shared/results_vanilla.csv')
     parser.add_argument('--metrics', nargs='*', default=['bleu', 'meteor'])
     parser.add_argument('--type', choices=['vanilla', 'finetuned'], default='vanilla')
@@ -54,12 +56,9 @@ def count_synonyms(predictions: Union[List[str], List[List[str]]], synonyms_1: L
 
         is_both = is_pos and is_neg
 
-        pos += int(is_pos)
-        neg += int(is_neg)
+        pos += int(is_pos and not is_both)
+        neg += int(is_neg and not is_both)
         is_both += int(is_both)
-
-        # if not is_pos and not is_neg and not is_both:
-        #     print(f'{synonyms_1[-1]} :: {prediction}')
 
     return pos, neg, both
 
@@ -72,7 +71,101 @@ def get_synonyms(synonyms_file: str) -> Dict[str, List[str]]:
     return synonyms
 
 
+def evaluate_captions(df: pd.DataFrame, caption_col: str, synonyms: Dict[str, List[str]]):
+    df[f'{caption_col}_contains_target'] = df.apply(lambda row: check_for_synonyms(row[caption_col], synonyms[row['target_concept']]), axis=1)
+    df[f'{caption_col}_contains_original'] = df.apply(lambda row: check_for_synonyms(row[caption_col], synonyms[row['original_concept']]), axis=1)
+    df[f'{caption_col}_contains_both'] = df[f'{caption_col}_contains_target'] & df[f'{caption_col}_contains_original']
+    df[f'{caption_col}_contains_none'] = (~df[f'{caption_col}_contains_target']) & (~df[f'{caption_col}_contains_original'])
+    df[f'{caption_col}_contains_target'] = df[f'{caption_col}_contains_target'] & (~df[f'{caption_col}_contains_both'])
+    df[f'{caption_col}_contains_original'] = df[f'{caption_col}_contains_original'] & (~df[f'{caption_col}_contains_both'])
+
+
 def main():
+    PRETRAINED_AVAILABLE = True
+
+    args = parse_args()
+    coco = COCO(args.captions_file)
+
+    concept_pairs_df = pd.read_csv(args.concept_pairs_file)
+    synonyms = get_synonyms(args.synonyms_file)
+
+    # Evaluate captions
+    scorer = {metric: evaluate.load(metric) for metric in args.metrics}
+    reference_captions = {}
+
+    result_paths = glob(os.path.join(args.results_dir, '*.csv'))
+    dfs = []
+    for result_path in result_paths:
+        dfs.append(pd.read_csv(result_path))
+    df = pd.concat(dfs, ignore_index=True)
+    df = df.rename(columns={'concept': 'target_concept'})
+    df = df.merge(concept_pairs_df[['target_concept', 'original_concept']], on='target_concept')
+
+    if PRETRAINED_AVAILABLE:
+        pretrained_df = df[df['frac'] == 0].rename(columns={'caption': 'pretrained_caption'})
+        evaluate_captions(pretrained_df, 'pretrained_caption', synonyms)
+
+        pretrained_cols = [f'pretrained_caption_contains_{m}' for m in ('target', 'original', 'both', 'none')]
+        df = df.merge(pretrained_df[['image_id', 'pretrained_caption', *pretrained_cols]], on='image_id', how='left')
+    df = df.rename(columns={'caption': 'finetuned_caption'})
+
+    keys = ['original_concept', 'target_concept', 'finetune_type', 'frac']
+    df['finetune_type'] = df['finetune_type'].fillna('')
+
+    evaluate_captions(df, 'finetuned_caption', synonyms)
+
+    groups = (df.groupby(keys))
+    metrics = {}
+    for key, group_df in groups:
+        print(*key)
+        metrics[key] = {
+            'num_images': len(group_df['image_id'].unique())
+        }
+
+        if PRETRAINED_AVAILABLE:
+            metrics[key].update({
+                f'attack_{m}': (group_df['pretrained_caption_contains_target'] & group_df[f'finetuned_caption_contains_{m}']).sum()
+                for m in ('original', 'target', 'both', 'none')
+            })
+
+        for mode in ('pretrained', 'finetuned') if PRETRAINED_AVAILABLE else ('finetuned',):
+            metrics[key].update({
+                f'{mode}_target': group_df[f'{mode}_caption_contains_target'].sum(),
+                f'{mode}_original': group_df[f'{mode}_caption_contains_original'].sum(),
+                f'{mode}_both': group_df[f'{mode}_caption_contains_both'].sum(),
+                f'{mode}_none': group_df[f'{mode}_caption_contains_none'].sum(),
+            })
+
+            # Evaluate using huggingface metrics
+            for metric in args.metrics:
+                predictions = group_df[f'{mode}_caption'].to_list()
+                image_ids = group_df['image_id'].astype(int)
+                references = []
+                for image_id in image_ids:
+                    reference_c = reference_captions.get(image_id)
+                    if reference_c is None:
+                        reference_captions[image_id] = get_captions(coco, image_id)
+                    references.append(reference_captions[image_id])
+
+                score = scorer[metric].compute(
+                    predictions=predictions,
+                    references=references
+                )[metric]
+
+                metrics[key].update({
+                    f'{mode}_{metric}': score
+                })
+
+    with open(args.outfile, 'w', newline='') as f:
+        writer = csv.DictWriter(f, keys + list(metrics[list(metrics.keys())[0]].keys()))
+        writer.writeheader()
+
+        for key, values in metrics.items():
+            values.update(dict(zip(keys, key)))
+            writer.writerow(values)
+
+
+def main2():
     args = parse_args()
     coco = COCO(args.captions_file)
 
