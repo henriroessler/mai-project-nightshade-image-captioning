@@ -171,6 +171,9 @@
     "sinks"
   ],
   "backpack": [
-    "backpacks"
+    "backpacks",
+    "luggage",
+    "bag",
+    "bags"
   ]
 }
