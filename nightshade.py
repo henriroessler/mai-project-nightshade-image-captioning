@@ -128,6 +128,24 @@ def nightshade(
         num_epochs: int = 50,
         lr: float = 0.003
 ) -> NightshadeResult:
+    """Poison a single image with respect to an anchor (target) image
+
+    :param img_original: Original (non-preprocessed) image
+    :param img_anchor: Anchor (non-preprocessed) image
+    :param bbox: (Optional) Bounding box containing part of image to be poisoned
+    :param encoder: CLIP Encoder model
+    :param lpips_criterion: LPIPS Loss model
+    :param downsample_size: Width and height of images after preprocessing
+    :param device: PyTorch device for computation
+    :param alpha: Hyperparameter controlling influence of LPIPS loss
+    :param beta: Hyperparameter controlling influence of overshoot loss
+    :param p: LPIPS toleration threshold
+    :param num_epochs: Number of poisoning epochs
+    :param lr: Learning rate of optimizer
+    :return: Poisoned image with associated data
+
+    """
+
 
     # Assertions
     assert (num_epochs > 0)
@@ -355,6 +373,16 @@ def coco_loader(args):
 
 
 def evaluate(model, image_preprocess_fn, image_path: str, caption: str, device) -> (float, float):
+    """Evaluate CLIP embeddings of image with respect to caption
+
+    :param model: CLIP model
+    :param image_preprocess_fn: Preprocessing pipeline
+    :param image_path: Path to image
+    :param caption: Text caption
+    :param device: PyTorch device for computation
+
+    """
+
     image = PIL.Image.open(image_path).convert("RGB")
     image = image_preprocess_fn(image).unsqueeze(0).to(device)
 
@@ -366,6 +394,19 @@ def evaluate(model, image_preprocess_fn, image_path: str, caption: str, device) 
 
 
 def evaluate_image_pairs(model, image_preprocess_fn, original_image_path: str, poisoned_image_path: str, target_image_path, device) -> (float, float):
+    """Evaluate CLIP embeddings of original, poisoned, and target
+    image
+
+    :param model: CLIP model
+    :param image_preprocess_fn: Preprocessing pipeline
+    :param original_image_path: Path to original image
+    :param poisoned_image_path: Path to poisoned image
+    :param target_image_path: Path to target image
+    :param device: PyTorch device for computation
+    :return: Distance original-poisoned, distance poisoned-target
+
+    """
+
     model.eval()
     with torch.no_grad():
         encode = lambda path: model.encode_image(image_preprocess_fn(PIL.Image.open(path)).unsqueeze(0).to(device))
