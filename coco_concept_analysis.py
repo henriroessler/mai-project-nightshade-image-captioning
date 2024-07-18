@@ -14,11 +14,13 @@ ANNOTATIONS_PATH = str(ROOT / "annotations" / "instances_all2014.json")
 dataset = CocoDetection(IMAGES_PATH, ANNOTATIONS_PATH)
 
 def analyze_concept(source_id, target_id):
+    """Analyze a COCO category (concept) with respect to a target concept"""
+
     def filter_image_ids(image_ids: List[int], blacklist_cat_id: int) -> List[int]:
+        """Remove images containing objects of a category"""
         result = []
         for id in image_ids:
             cat_ids = set([ann['category_id'] for ann in dataset.coco.imgToAnns[id]])
-            # if id in valid_image_ids and blacklist_cat_id not in cat_ids and (not args.single_class or len(cat_ids) == 1):
             if blacklist_cat_id not in cat_ids:
                 result.append(id)
         return result
@@ -27,10 +29,20 @@ def analyze_concept(source_id, target_id):
     image_ids = dataset.coco.getImgIds(catIds=[source_id])
     image_ids_filt = filter_image_ids(image_ids, target_id)
 
+    # All areas of all bounding boxes of annotations of source category
     bounding_box_areas = []
+
+    # All areas of all annotations of source category
     areas = []
+
+    # For every image, proportion of image area covered by bounding
+    # boxes of annotations source category
     coverages = []
+
+    # For every image, number of total annotations
     annotation_counts = []
+
+    # For every image, number of annotations of source category
     annotation_of_source_concept_counts = []
 
     for image_id in image_ids_filt:
@@ -41,7 +53,6 @@ def analyze_concept(source_id, target_id):
         ann_ids = dataset.coco.getAnnIds(imgIds=[image_id])
         anns = dataset.coco.loadAnns(ann_ids)
         anns_source = [ann for ann in anns if ann['category_id'] == source_id]
-        anns_other = [ann for ann in anns if ann['category_id'] != source_id]
 
         annotation_counts += [len(anns)]
         annotation_of_source_concept_counts += [len(anns_source)]
@@ -63,11 +74,6 @@ def analyze_concept(source_id, target_id):
                 areas += [area / img_area]
 
         coverages += [torch.sum(coverage) / img_area]
-
-    # plt.clf()
-    # plt.hist(annotation_of_source_concept_counts, bins=30)
-    # plt.savefig("bounding_boxes.png")
-    # plt.show()
 
     average_bounding_box_area = torch.tensor(bounding_box_areas).float().mean()
     average_area = torch.tensor(areas).float().mean()
@@ -112,6 +118,9 @@ with open(output_file, "w") as f:
 
     for source_name, target_name in concept_pairs:
         result = analyze_concept_named(source_name, target_name)
+
+        # We are also interested in the reverse direction as we also
+        # perform bidirectional poisoning
         result_reversed = analyze_concept_named(target_name, source_name)
 
         writer.writerow([
