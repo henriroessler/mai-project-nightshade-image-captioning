@@ -254,6 +254,8 @@ class NightshadeItem:
 
 
 def individual_loader(args):
+    """Generator for a single Nightshade poisoning candidate"""
+
     yield NightshadeItem(
         args.original_img,
         args.target_img,
@@ -262,6 +264,8 @@ def individual_loader(args):
 
 
 def coco_loader(args):
+    """Generator for Nightshade poisoning candidates from the COCO
+    dataset"""
 
     # Load train/val/test/restval splits
     with open(args.split_file, 'r') as f:
@@ -290,6 +294,12 @@ def coco_loader(args):
 
     # Filter data
     def filter_image_ids(image_ids: List[int], blacklist_cat_id: int) -> List[int]:
+        """Remove all images - with annotations of the specified
+        category - images not contained in the selected dataset split
+        - images containing annotations of multiple categories (if
+        this is desired)
+
+        """
         result = []
         for id in image_ids:
             cat_ids = set([ann['category_id'] for ann in dataset.coco.imgToAnns[id]])
