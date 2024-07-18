@@ -22,6 +22,7 @@ supercategories = list(set([x['supercategory'] for x in categories]))
 
 mapping = []
 def not_in_map(category):
+    """Checks whether this category is already a target concept"""
     for item in mapping:
         if item[1]['id'] == category['id']: return False
     return True
@@ -50,10 +51,12 @@ for i, category_a in enumerate(categories):
 
     mapping += [(category_a, category_b)]
 
+# write IDs as CSV
 with open("mapping_ids.csv", "w") as f:
     for item in mapping:
         f.write(f"{item[0]['id']},{item[1]['id']}\n")
 
+# write names as CSV
 with open("mapping_names.csv", "w") as f:
     for item in mapping:
         f.write(f"{item[0]['name']},{item[1]['name']}\n")
