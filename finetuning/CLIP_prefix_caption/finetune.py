@@ -40,17 +40,13 @@ class ClipCocoDataset(Dataset):
         mask = tokens.ge(0)  # mask is zero where we out of sequence
         tokens[~mask] = 0
         mask = mask.float()
-        mask = torch.cat(
-            (torch.ones(self.prefix_length), mask), dim=0
-        )  # adding prefix mask
+        mask = torch.cat((torch.ones(self.prefix_length), mask), dim=0)  # adding prefix mask
         return tokens, mask
 
     def __getitem__(self, item: int) -> Tuple[torch.Tensor, ...]:
 
         prefix = self.all_data[item]["clip_embedding"]
-        caption_index = np.random.choice(
-            np.arange(len(self.all_captions[item]["caption_tokens"]))
-        )
+        caption_index = np.random.choice(np.arange(len(self.all_captions[item]["caption_tokens"])))
         tokens, mask = self.pad_tokens(item, caption_index)
         if self.normalize_prefix:
             prefix = prefix.float()
@@ -59,70 +55,45 @@ class ClipCocoDataset(Dataset):
 
     def __init__(
         self,
-        all_data_paths: str,
+        all_data,
         prefix_length: int,
+        save_prefix: str,
         gpt2_type: str = "gpt2",
         normalize_prefix=False,
     ):
         self.tokenizer = GPT2Tokenizer.from_pretrained(gpt2_type)
         self.prefix_length = prefix_length
         self.normalize_prefix = normalize_prefix
-        self.all_data = []
+        self.all_data = all_data
         self.all_captions = []
-        for concept_pair_data_file in all_data_paths:
-            with open(
-                os.path.join(
-                    "/home/hpc/g103ea/g103ea14/mai/CLIP_prefix_caption/data/coco",
-                    concept_pair_data_file,
-                ),
-                "rb",
-            ) as f:
-                concept_pair_data = pickle.load(f)
-                self.all_data.extend(concept_pair_data)
 
-            if os.path.isfile(f"{concept_pair_data_file[:-4]}_tokens.pkl"):
-                with open(
-                    os.path.join(
-                        "/home/hpc/g103ea/g103ea14/mai/CLIP_prefix_caption/tokens/coco",
-                        f"{concept_pair_data_file[:-4]}_tokens.pkl",
-                    ),
-                    "rb",
-                ) as f:
-                    self.all_captions.extend(pickle.load(f))
-            else:
-                concept_pair_captions = []
-                for img_concept_pair in concept_pair_data:
-                    img_concept_pair_captions_enc = {
-                        "original_id": img_concept_pair["original_id"],
-                        "poisoned_image_path": img_concept_pair["poisoned_image_path"],
-                        "captions": img_concept_pair["captions"],
-                        "caption_tokens": [],
-                    }
-                    for caption in img_concept_pair["captions"]:
-                        img_concept_pair_captions_enc["caption_tokens"].append(
-                            torch.tensor(
-                                self.tokenizer.encode(caption), dtype=torch.int64
-                            )
-                        )
-                    concept_pair_captions.append(img_concept_pair_captions_enc)
+        for img in self.all_data:
+            img_captions_enc = {
+                "image_type": img["image_type"],
+                "image_id": img["image_id"],
+                "image_path": img["image_path"],
+                "captions": img["captions"],
+                "caption_tokens": [],
+            }
+            for caption in img["captions"]:
+                img_captions_enc["caption_tokens"].append(
+                    torch.tensor(self.tokenizer.encode(caption), dtype=torch.int64)
+                )
+            self.all_captions.append(img_captions_enc)
 
-                with open(
-                    os.path.join(
-                        "/home/hpc/g103ea/g103ea14/mai/CLIP_prefix_caption/tokens/coco",
-                        f"{concept_pair_data_file[:-4]}_tokens.pkl",
-                    ),
-                    "wb",
-                ) as f:
-                    pickle.dump(concept_pair_captions, f)
-                self.all_captions.extend(concept_pair_captions)
-        print("Data size is %0d" % len(self.all_data))
+        with open(
+            os.path.join(
+                "/home/hpc/g103ea/g103ea14/mai/CLIP_prefix_caption/tokens/coco",
+                f"{save_prefix}_tokens.pkl",
+            ),
+            "wb",
+        ) as f:
+            pickle.dump(self.all_captions, f)
+
+        print("Caption embeddings size is %0d" % len(self.all_captions))
         sys.stdout.flush()
-        all_len = torch.tensor(
-            [len(j) for i in self.all_captions for j in i["caption_tokens"]]
-        ).float()
-        self.max_seq_len = min(
-            int(all_len.mean() + all_len.std() * 10), int(all_len.max())
-        )
+        all_len = torch.tensor([len(j) for i in self.all_captions for j in i["caption_tokens"]]).float()
+        self.max_seq_len = min(int(all_len.mean() + all_len.std() * 10), int(all_len.max()))
 
 
 class MLP(nn.Module):
@@ -143,9 +114,7 @@ class MLP(nn.Module):
 class ClipCaptionModel(nn.Module):
 
     def get_dummy_token(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        return torch.zeros(
-            batch_size, self.prefix_length, dtype=torch.int64, device=device
-        )
+        return torch.zeros(batch_size, self.prefix_length, dtype=torch.int64, device=device)
 
     def forward(
         self,
@@ -155,9 +124,7 @@ class ClipCaptionModel(nn.Module):
         labels: Optional[torch.Tensor] = None,
     ):
         embedding_text = self.gpt.transformer.wte(tokens)
-        prefix_projections = self.clip_project(prefix).view(
-            -1, self.prefix_length, self.gpt_embedding_size
-        )
+        prefix_projections = self.clip_project(prefix).view(-1, self.prefix_length, self.gpt_embedding_size)
         embedding_cat = torch.cat((prefix_projections, embedding_text), dim=1)
         if labels is not None:
             dummy_token = self.get_dummy_token(tokens.shape[0], tokens.device)
@@ -175,9 +142,7 @@ class ClipCaptionModel(nn.Module):
         self.gpt = GPT2LMHeadModel.from_pretrained("gpt2")
         self.gpt_embedding_size = self.gpt.transformer.wte.weight.shape[1]
         if prefix_length > 10:  # not enough memory
-            self.clip_project = nn.Linear(
-                prefix_size, self.gpt_embedding_size * prefix_length
-            )
+            self.clip_project = nn.Linear(prefix_size, self.gpt_embedding_size * prefix_length)
         else:
             self.clip_project = MLP(
                 (
@@ -229,9 +194,7 @@ def train(
     model = model.to(device)
     model.train()
     optimizer = AdamW(model.parameters(), lr=lr)
-    train_dataloader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, drop_last=True
-    )
+    train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
@@ -251,9 +214,7 @@ def train(
             )
             outputs = model(tokens, prefix, mask)
             logits = outputs.logits[:, dataset.prefix_length - 1 : -1]
-            loss = nnf.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]), tokens.flatten(), ignore_index=0
-            )
+            loss = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), tokens.flatten(), ignore_index=0)
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -280,50 +241,53 @@ def main():
         "-d",
         "--data",
         nargs="*",
-        help="All files in data/coco to include in finetuning.",
-        required=False,
-        default=[
-            "results_boat_sandwich.pkl",
-            "results_car_motorcycle.pkl",
-            "results_cat_train.pkl",
-            "results_cup_bottle.pkl",
-            "results_horse_cow.pkl",
-            "results_orange_banana.pkl",
-            "results_person_airplane.pkl",
-            "results_sink_backpack.pkl",
-            "results_skateboard_surfboard.pkl",
-            "results_wine_glass_traffic_light.pkl",
-        ],
+        help="Path to embeddings",
+        required=True,  # "/home/atuin/g103ea/shared/embeddings/restval-filtered" "/home/atuin/g103ea/shared/embeddings/restval-switched-filtered"
     )
+    parser.add_argument("-frac", "--fraction", required=True, type=int)
     parser.add_argument("-pt", "--pt_model", required=True, type=str)
     parser.add_argument("-o", "--out_dir", required=True, type=str)
     parser.add_argument("-pre", "--prefix", required=True, type=str)
     parser.add_argument("-E", "--epochs", type=int, default=10)
     parser.add_argument("-save", "--save_every", type=int, default=1)
     parser.add_argument("-bs", "--bs", type=int, default=40)
-    parser.add_argument("--only_prefix", dest="only_prefix", action="store_true")
-    parser.add_argument(
-        "--normalize_prefix", dest="normalize_prefix", action="store_true"
-    )
+    parser.add_argument("--normalize_prefix", dest="normalize_prefix", action="store_true")
     args = parser.parse_args()
 
+    all_data = []
+    for folder in args.data:
+        print(f"Starting {folder}")
+        for embed_file in os.listdir(folder):
+            if "poisoned" in embed_file:
+                print(f"Starting {embed_file}")
+                poison_embed = pickle.load(open(os.path.join(folder, embed_file), "rb"))
+                orig_embed = pickle.load(
+                    open(
+                        os.path.join(folder, embed_file.replace("poisoned", "original")),
+                        "rb",
+                    )
+                )
+                poison_indices = np.random.choice(len(poison_embed), int(args.fraction * len(poison_embed) / 100.0))
+                print(f"Adding {len(poison_indices)}/{len(poison_embed)} of poisoned data")
+                for i in range(len(poison_embed)):
+                    if i in poison_indices:
+                        all_data.append(poison_embed[i])
+                    else:
+                        all_data.append(orig_embed[i])
+
+    print(f"Full dataset size: {len(all_data)}")
+
     dataset = ClipCocoDataset(
-        args.data, PREFIX_LENGTH, normalize_prefix=args.normalize_prefix
+        all_data,
+        PREFIX_LENGTH,
+        save_prefix=args.prefix,
+        normalize_prefix=args.normalize_prefix,
     )
 
-    if args.only_prefix:
-        model = ClipCaptionPrefix(
-            PREFIX_LENGTH,
-            prefix_size=PREFIX_DIM,
-        )
-        print("Train only prefix")
-    else:
-        model = ClipCaptionModel(
-            PREFIX_LENGTH,
-            prefix_size=PREFIX_DIM,
-        )
-        print("Train both prefix and GPT")
-        sys.stdout.flush()
+    model = ClipCaptionPrefix(
+        PREFIX_LENGTH,
+        prefix_size=PREFIX_DIM,
+    )
 
     load_model(args.pt_model, model)
     train(dataset, model, args, output_dir=args.out_dir, output_prefix=args.prefix)
