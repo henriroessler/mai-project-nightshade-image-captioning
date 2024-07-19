@@ -22,11 +22,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        '--results-dir', default='shared/nightshade/coco-2014-restval',
-        help='Directory that contains the CSV files created by the nightshade.py script.'
+        '--results-dir', default='results/finetuning',
+        help='Directory that contains the predicted captions for the pretrained and finetuned models.'
     )
     parser.add_argument(
-        '--captions-file', default='shared/coco2014/annotations/captions_all2014.json',
+        '--captions-file', default='datasets/coco/annotations/captions_all2014.json',
         help='Path to COCO captions annotation file.'
     )
     parser.add_argument(
