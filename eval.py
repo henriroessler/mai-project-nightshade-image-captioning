@@ -13,122 +13,262 @@ import re
 
 
 def parse_args():
+    """
+    Parse program arguments.
+
+    :return: Program arguments
+    """
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--results-dir', default='shared/nightshade/coco-2014-restval')
-    parser.add_argument('--captions-file', default='shared/coco2014/annotations/captions_all2014.json')
-    parser.add_argument('--synonyms-file', default='datasets/coco_synonyms.json')
-    parser.add_argument('--concept-pairs-file', default='shared/concept_pairs.csv')
-    parser.add_argument('--outfile', default='shared/results_vanilla.csv')
-    parser.add_argument('--metrics', nargs='*', default=['bleu', 'meteor'])
-    parser.add_argument('--type', choices=['vanilla', 'finetuned'], default='vanilla')
+
+    parser.add_argument(
+        '--results-dir', default='shared/nightshade/coco-2014-restval',
+        help='Directory that contains the CSV files created by the nightshade.py script.'
+    )
+    parser.add_argument(
+        '--captions-file', default='shared/coco2014/annotations/captions_all2014.json',
+        help='Path to COCO captions annotation file.'
+    )
+    parser.add_argument(
+        '--synonyms-file', default='datasets/coco_synonyms.json',
+        help='Path to file containing synonyms for each concept.'
+    )
+    parser.add_argument(
+        '--concept-pairs-file', default='datasets/concept_pairs.csv',
+        help='Path to file containing concept pairs.'
+    )
+    parser.add_argument(
+        '--outfile', default='results/results.csv',
+        help='Path to output file.'
+    )
+    parser.add_argument(
+        '--metrics', nargs='*', default=['bleu', 'meteor'],
+        help='List of metrics to evaluate against.'
+    )
+    parser.add_argument(
+        '--type', choices=['vanilla', 'finetuned'], default='vanilla',
+        help='NOT USED.'
+    )
+
     return parser.parse_args()
 
 
-def get_captions(coco: COCO, id: int):
+def get_captions(coco: COCO, id: int) -> List[str]:
+    """
+    Extracts captions of a COCO image.
+
+    :param coco: COCO dataset
+    :param id: COCO image ID
+    :return: List of captions
+    """
+
     anns = coco.imgToAnns[id]
     captions = [ann['caption'] for ann in anns]
     return captions
 
 
 # Source: https://stackoverflow.com/questions/5319922/check-if-a-word-is-in-a-string-in-python
-def check_for_synonyms(prediction: str, synonyms: List[str]) -> bool:
+def check_for_synonyms(caption: str, synonyms: List[str]) -> bool:
+    """
+    Checks if a caption contains at least one word in a specified list.
+
+    :param caption: Caption
+    :param synonyms: Synonyms of a concept
+    :return: Whether the caption contains the concept (or synonyms of it) or not
+    """
+
+    # Iterate over all synonyms
     for synonym in synonyms:
-        result = re.compile(r'\b({0})\b'.format(synonym), flags=re.IGNORECASE).search(prediction)
+        # Try to find the full synonym phrase in the caption
+        result = re.compile(r'\b({0})\b'.format(synonym), flags=re.IGNORECASE).search(caption)
+
         if result is not None:
+            # If a match has been found, return True
             return True
+
+    # Otherwise, if no synonym was found, return False
     return False
 
 
-def count_synonyms(predictions: Union[List[str], List[List[str]]], synonyms_1: List[str], synonyms_2: List[str]) -> (int, int, int):
+def count_synonyms(captions: Union[List[str], List[List[str]]], synonyms_1: List[str], synonyms_2: List[str]) -> (int, int, int):
+    """
+    Counts the number of captions that contain a concept or the opposing concept (or both)
+
+    :param captions: List of captions
+    :param synonyms_1: Set of synonyms of the original concept
+    :param synonyms_2: Set of synonyms of the target concept
+    :return: Tuple (
+        # captions containing only the original concept,
+        # captions containing only the target concept,
+        # captions containing both concepts
+    )
+    """
+
+    # Hold values for all counts
     pos, neg, both = 0, 0, 0
-    for prediction_list in predictions:
 
-        if isinstance(prediction_list, str):
-            prediction_list = [prediction_list]
+    # For all predictions
+    for caption_list in captions:
 
-        # check if at least one caption includes the synonyms
+        # We may also want to count whether a concept occurs in a set of reference captions.
+        # To capture both scenarios, we first transform a list of strings into a list of string lists.
+        # So we can use this method for both, lists of captions and lists of reference caption lists.
+        if isinstance(caption_list, str):
+            caption_list = [caption_list]
+
+        # Check if at least one caption includes one of the synonyms
         is_pos = is_neg = False
-        for prediction in prediction_list:
+        for caption in caption_list:
             if not is_pos:
-                is_pos |= check_for_synonyms(prediction, synonyms_1)
+                # Check if caption contains original concept
+                is_pos |= check_for_synonyms(caption, synonyms_1)
             if not is_neg:
-                is_neg |= check_for_synonyms(prediction, synonyms_2)
+                # Check if caption contains target concept
+                is_neg |= check_for_synonyms(caption, synonyms_2)
 
+        # Increment counts
         is_both = is_pos and is_neg
 
         pos += int(is_pos and not is_both)
         neg += int(is_neg and not is_both)
         is_both += int(is_both)
 
+    # Return counts
     return pos, neg, both
 
 
 def get_synonyms(synonyms_file: str) -> Dict[str, List[str]]:
+    """
+    Parse synonyms file
+
+    :param synonyms_file: Path to synonyms file
+    :return: Dictionary that maps a concept to a list containing the concept itself and all of its synonyms
+    """
+
+    # Read the synonyms file
     with open(synonyms_file, 'r') as f:
+        # Load the dictionary
         synonyms = json.load(f)
+
+        # Iterate over all concepts
         for concept in synonyms.keys():
+            # Add the concept itself to the list of synonyms
             synonyms[concept].append(concept)
+
+    # Return the dictionary
     return synonyms
 
 
 def evaluate_captions(df: pd.DataFrame, caption_col: str, synonyms: Dict[str, List[str]]):
+    """
+    Adds boolean columns to a pandas DataFrame that tell if the captions in a specified column include
+    the original concept, the target concept, both concepts or none of them.
+
+    :param df: Pandas DataFrame
+    :param caption_col: Name of the column containing the captions of interest
+    :param synonyms: Synonyms
+    """
+
+    # Store if captions contain target concept
     df[f'{caption_col}_contains_target'] = df.apply(lambda row: check_for_synonyms(row[caption_col], synonyms[row['target_concept']]), axis=1)
+
+    # Store if captions contain original concept
     df[f'{caption_col}_contains_original'] = df.apply(lambda row: check_for_synonyms(row[caption_col], synonyms[row['original_concept']]), axis=1)
+
+    # Store if captions contain both concept
     df[f'{caption_col}_contains_both'] = df[f'{caption_col}_contains_target'] & df[f'{caption_col}_contains_original']
+
+    # Store if captions contain none of the concepts
     df[f'{caption_col}_contains_none'] = (~df[f'{caption_col}_contains_target']) & (~df[f'{caption_col}_contains_original'])
+
+    # Store if captions contain ONLY the target concept
     df[f'{caption_col}_contains_target'] = df[f'{caption_col}_contains_target'] & (~df[f'{caption_col}_contains_both'])
+
+    # Store if captions contain ONLY the original concept
     df[f'{caption_col}_contains_original'] = df[f'{caption_col}_contains_original'] & (~df[f'{caption_col}_contains_both'])
 
 
 def main():
+    """
+    Main program.
+    """
+
     PRETRAINED_AVAILABLE = True
 
+    # Parse program arguments
     args = parse_args()
+
+    # Load COCO captions
     coco = COCO(args.captions_file)
 
+    # Load concept pairs
     concept_pairs_df = pd.read_csv(args.concept_pairs_file)
+
+    # Load synonyms
     synonyms = get_synonyms(args.synonyms_file)
 
-    # Evaluate captions
+    # Load Huggingface metric evaluators
     scorer = {metric: evaluate.load(metric) for metric in args.metrics}
+
+    # Hold dictionary for reference captions
     reference_captions = {}
 
+    # Collect all CSV files and concatenate them to a single pandas DataFrame
     result_paths = glob(os.path.join(args.results_dir, '*.csv'))
     dfs = []
     for result_path in result_paths:
         dfs.append(pd.read_csv(result_path))
     df = pd.concat(dfs, ignore_index=True)
     df = df.rename(columns={'concept': 'target_concept'})
+
+    # Add original concept
     df = df.merge(concept_pairs_df[['target_concept', 'original_concept']], on='target_concept')
 
     if PRETRAINED_AVAILABLE:
+        # Evaluate captions generated by pretrained ClipCap model
         pretrained_df = df[df['frac'] == 0].rename(columns={'caption': 'pretrained_caption'})
         evaluate_captions(pretrained_df, 'pretrained_caption', synonyms)
 
+        # Add evaluation results of pretrained captions to each test image
+        # This allows us to compare the captions generated by each finetuned ClipCap model with those captions generated
+        # by the original pretrained model
         pretrained_cols = [f'pretrained_caption_contains_{m}' for m in ('target', 'original', 'both', 'none')]
         df = df.merge(pretrained_df[['image_id', 'pretrained_caption', *pretrained_cols]], on='image_id', how='left')
-    df = df.rename(columns={'caption': 'finetuned_caption'})
 
-    keys = ['original_concept', 'target_concept', 'finetune_type', 'frac']
+    df = df.rename(columns={'caption': 'finetuned_caption'})
     df['finetune_type'] = df['finetune_type'].fillna('')
 
+    # Evaluate captions generated by each finetuned ClipCap model
     evaluate_captions(df, 'finetuned_caption', synonyms)
 
+    # Group results by original concept, target concept, the finetuning type and the fraction of poisoned images
+    # The finetuning type can either be unidirectional (origpairs) or bidirectional (switchpairs)
+    keys = ['original_concept', 'target_concept', 'finetune_type', 'frac']
     groups = (df.groupby(keys))
+
+    # Hold dictionary for metrics
     metrics = {}
+
+    # Iterate over each group
     for key, group_df in groups:
         print(*key)
+
+        # Collect the number of test images
         metrics[key] = {
             'num_images': len(group_df['image_id'].unique())
         }
 
         if PRETRAINED_AVAILABLE:
+            # Collect whether the finetuned caption contained the original or target concept (or both or none)
+            # in case the pretrained model did correctly mention the target concept
             metrics[key].update({
                 f'attack_{m}': (group_df['pretrained_caption_contains_target'] & group_df[f'finetuned_caption_contains_{m}']).sum()
                 for m in ('original', 'target', 'both', 'none')
             })
 
+        # Collect metrics for pretrained (if available) and finetuned captions
         for mode in ('pretrained', 'finetuned') if PRETRAINED_AVAILABLE else ('finetuned',):
+            # Collect number of captions that contain the original or target concept (or both or none)
             metrics[key].update({
                 f'{mode}_target': group_df[f'{mode}_caption_contains_target'].sum(),
                 f'{mode}_original': group_df[f'{mode}_caption_contains_original'].sum(),
@@ -136,9 +276,12 @@ def main():
                 f'{mode}_none': group_df[f'{mode}_caption_contains_none'].sum(),
             })
 
-            # Evaluate using huggingface metrics
+            # Evaluate the captions using Huggingface metrics
             for metric in args.metrics:
+                # Get predicted caption
                 predictions = group_df[f'{mode}_caption'].to_list()
+
+                # Get reference captions
                 image_ids = group_df['image_id'].astype(int)
                 references = []
                 for image_id in image_ids:
@@ -147,6 +290,7 @@ def main():
                         reference_captions[image_id] = get_captions(coco, image_id)
                     references.append(reference_captions[image_id])
 
+                # Calculate the metric
                 score = scorer[metric].compute(
                     predictions=predictions,
                     references=references
@@ -156,16 +300,24 @@ def main():
                     f'{mode}_{metric}': score
                 })
 
+    # Write metrics to CSV file
     with open(args.outfile, 'w', newline='') as f:
+        # Create CSV writer
         writer = csv.DictWriter(f, keys + list(metrics[list(metrics.keys())[0]].keys()))
+
+        # Write CSV header
         writer.writeheader()
 
+        # For each group, write all metrics
         for key, values in metrics.items():
             values.update(dict(zip(keys, key)))
             writer.writerow(values)
 
 
 def main2():
+    """
+    NOT USED.
+    """
     args = parse_args()
     coco = COCO(args.captions_file)
 
