@@ -120,6 +120,24 @@ Each of these scripts contains call to the exact python file which contains the 
    captions containing the original and target concept for each concept, finetuning 
    strategy and fraction of poisoned images. The raw results used for the publication can be found in
    [`results/results_all_finetuned_w_pretrained.csv`](results/results_all_finetuned_w_pretrained.csv).
+3. CLIP Image Classification Evaluation:
+
+   To obtain zero-shot classification results using CLIP for both original and poisoned images based on the COCO dataset concepts, run the [`clip_classification_eval.py`](clip_classification_eval.py) script:
+      ```bash
+      python3 clip_classification_eval.py \
+      --results-dir results/finetuning \
+      --outfile results/clip_classification_results.csv
+      ```
+      This will create a CSV file `results/clip_classification_results.csv` containing the following columns:
+      - `original_concept`: The original concept label.
+      - `target_concept`: The target concept label.
+      - `original_img_orig_concept`: Fraction of original images classified as the original concept.
+      - `original_img_target_concept`: Fraction of original images classified as the target concept.
+      - `poisoned_img_target_concept`: Fraction of poisoned images classified as the target concept.
+      - `poisoned_img_orig_concept`: Fraction of poisoned images classified as the original concept.
+
+      The raw results used for the publication can be found in the folder
+      [`results/clip-classification`](results/clip-classification).
 
 ## Plot t-SNE projections of CLIP embeddings
 Execute the [`plot_embeddings.py`](plot_embeddings.py) script:
