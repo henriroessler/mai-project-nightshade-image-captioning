@@ -97,3 +97,20 @@ python3 clipcap_inference \
 ```
 
 This will print out captions generated for all images in `$IMAGES`.
+
+## To finetune the ClipCap model on poisoned images
+1. Upload the pretrained CLIP model in an appropriate folder
+2. Add appropriate paths and parameters in `finetune/launch_embed.sh` to generate embeddings
+```bash
+cd finetune
+sbatch launch_embed.sh
+```
+3. Repeat the above exercise in `finetune/launch_finetune.sh` to finetune the ClipCap model using the generated embeddings
+```bash
+sbatch launch_finetune.sh
+```  
+4. Repeat in `finetune/launch_predict.sh` to generate the predictions of finetuned ClipCap model on test data
+```bash
+sbatch launch_predict.sh
+```  
+Each of these scripts contains call to the exact python file which contains the code for each task.
